@@ -1,0 +1,168 @@
+{
+  "examples": [
+    {
+      "website": "69shuba",
+      "type": "Default+XPath",
+      "description": "69书吧 - 典型小说站",
+      "generated_rule": {
+        "bookSourceName": "69书吧",
+        "bookSourceUrl": "https://www.69shuba.com",
+        "bookSourceType": 0,
+        "searchUrl": "/modules/article/search.php,{\"method\":\"POST\",\"body\":\"searchkey={{key}}&searchtype=all\",\"charset\":\"gbk\"}",
+        "ruleSearch": {
+          "bookList": "class.newbox@tag.li",
+          "name": "tag.a.0@text",
+          "author": "tag.span.-1@text##.*：",
+          "bookUrl": "tag.a.0@href",
+          "coverUrl": "tag.img@src"
+        },
+        "ruleBookInfo": {
+          "name": "class.booknav2@tag.h1@text",
+          "author": "class.booknav2@tag.a.0@text",
+          "coverUrl": "class.bookimg2@tag.img@src",
+          "intro": "class.navtxt@tag.p.-1@text",
+          "kind": "class.booknav2@tag.a.1@text",
+          "lastChapter": "class.qustime@tag.a@text"
+        },
+        "ruleToc": {
+          "chapterList": "id.catalog@tag.li",
+          "chapterName": "tag.a@text",
+          "chapterUrl": "tag.a@href"
+        },
+        "ruleContent": {
+          "content": "class.txtnav@html##<p>.*?</p>|<script[\\s\\S]*?</script>"
+        }
+      }
+    },
+    {
+      "website": "biquge",
+      "type": "Default（推荐）",
+      "description": "笔趣阁类站点通用 - 使用Default语法",
+      "generated_rule": {
+        "bookSourceName": "笔趣阁",
+        "bookSourceUrl": "https://www.biquge.com",
+        "bookSourceType": 0,
+        "searchUrl": "/search.php?q={{key}}",
+        "ruleSearch": {
+          "bookList": "class.result-list@class.result-item",
+          "name": "class.result-game-item-title-link@text",
+          "author": "@css:.result-game-item-info-tag:nth-child(1)@text##作\\s*者：",
+          "bookUrl": "class.result-game-item-title-link@href",
+          "coverUrl": "class.result-game-item-pic@tag.img@src",
+          "intro": "class.result-game-item-desc@text"
+        },
+        "ruleBookInfo": {
+          "name": "id.info@tag.h1@text",
+          "author": "@css:#info p:nth-child(1)@text##作.*?：",
+          "coverUrl": "id.fmimg@tag.img@src",
+          "intro": "id.intro@text",
+          "lastChapter": "@css:#info p:nth-child(4) a@text"
+        },
+        "ruleToc": {
+          "chapterList": "id.list@tag.dd@tag.a",
+          "chapterName": "text",
+          "chapterUrl": "href"
+        },
+        "ruleContent": {
+          "content": "id.content@html##<script[\\s\\S]*?</script>|请收藏.*"
+        }
+      }
+    },
+    {
+      "website": "qidian",
+      "type": "JSONPath",
+      "description": "起点中文网API",
+      "generated_rule": {
+        "bookSourceName": "起点中文网",
+        "bookSourceUrl": "https://m.qidian.com",
+        "bookSourceType": 0,
+        "searchUrl": "https://m.qidian.com/majax/search/list?kw={{key}}&pageNum={{page}}",
+        "ruleSearch": {
+          "bookList": "$.data.records",
+          "name": "$.bName",
+          "author": "$.bAuth",
+          "bookUrl": "https://m.qidian.com/book/{{$.bid}}",
+          "coverUrl": "https://bookcover.yuewen.com/qdbimg/349573/{{$.bid}}/150",
+          "intro": "$.desc",
+          "kind": "$.cat"
+        },
+        "ruleBookInfo": {
+          "tocUrl": "/ajax/book/category?bookId=@css:meta[property=\"og:url\"]@content##.*/",
+          "init": "@json:$.data"
+        },
+        "ruleToc": {
+          "chapterList": "$.data.vs[*].cs[*]",
+          "chapterName": "$.cN",
+          "chapterUrl": "https://m.qidian.com/book/{{$.bid}}/{{$.id}}"
+        },
+        "ruleContent": {
+          "content": "$.data.content",
+          "sourceRegex": "m\\.qidian\\.com/majax/chapter/getChapterInfo"
+        }
+      }
+    },
+    {
+      "website": "xbiquge",
+      "type": "XPath",
+      "description": "新笔趣阁XPath示例",
+      "generated_rule": {
+        "bookSourceName": "新笔趣阁",
+        "bookSourceUrl": "https://www.xbiquge.la",
+        "bookSourceType": 0,
+        "searchUrl": "/search.php?keyword={{key}}",
+        "ruleSearch": {
+          "bookList": "//div[@class=\"result-item\"]",
+          "name": "//h3/a/text()",
+          "author": "//p[@class=\"result-game-item-info-tag\"][1]/span[2]/text()",
+          "bookUrl": "//h3/a/@href",
+          "coverUrl": "//img/@src",
+          "intro": "//p[@class=\"result-game-item-desc\"]/text()"
+        },
+        "ruleBookInfo": {
+          "name": "//div[@id=\"info\"]/h1/text()",
+          "author": "//div[@id=\"info\"]/p[1]/a/text()",
+          "coverUrl": "//div[@id=\"fmimg\"]/img/@src",
+          "intro": "//div[@id=\"intro\"]/p/text()",
+          "lastChapter": "//div[@id=\"info\"]/p[4]/a/text()"
+        },
+        "ruleToc": {
+          "chapterList": "//div[@id=\"list\"]/dl/dd/a",
+          "chapterName": "/text()",
+          "chapterUrl": "/@href"
+        },
+        "ruleContent": {
+          "content": "//div[@id=\"content\"]",
+          "replaceRegex": "##一秒记住.*|##请收藏本站.*"
+        }
+      }
+    },
+    {
+      "website": "missevan",
+      "type": "有声书嗅探",
+      "description": "猫耳FM有声书源",
+      "generated_rule": {
+        "bookSourceName": "猫耳FM",
+        "bookSourceUrl": "https://www.missevan.com",
+        "bookSourceType": 1,
+        "searchUrl": "https://www.missevan.com/dramaapi/search?s={{key}}&page=1",
+        "ruleSearch": {
+          "bookList": "$.info.Datas",
+          "name": "$.name",
+          "author": "$.author",
+          "bookUrl": "https://www.missevan.com/mdrama/drama/{{$.id}},{\"webView\":true}",
+          "coverUrl": "$.cover",
+          "intro": "$.abstract"
+        },
+        "ruleToc": {
+          "chapterList": "@css:.scroll-list.btn-groups>a",
+          "chapterName": "text",
+          "chapterUrl": "href##$##,{\"webView\":true}"
+        },
+        "ruleContent": {
+          "content": "https://static.missevan.com/{{//*[contains(@class,\"pld-sound-active\")]/@data-soundurl64}}",
+          "sourceRegex": ".*\\.(mp3|m4a).*"
+        }
+      }
+    }
+  ]
+}
