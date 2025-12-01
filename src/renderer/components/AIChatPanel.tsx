@@ -95,6 +95,186 @@ interface Message {
   provider?: string;
 }
 
+/**
+ * 智能裁剪响应数据
+ * 根据内容类型和测试模式进行智能裁剪，保留关键结构信息
+ */
+function smartTrimResponse(rawResponse: string, testMode: string): string {
+  const MAX_LENGTH = 8000; // 最大字符数
+  const originalLength = rawResponse.length;
+  
+  // 如果数据量不大，直接返回
+  if (originalLength <= MAX_LENGTH) {
+    return `原始响应（${originalLength.toLocaleString()}字符）：\n${rawResponse}`;
+  }
+
+  let trimmed = rawResponse;
+
+  // 1. 尝试检测是否为 JSON
+  try {
+    const jsonData = JSON.parse(rawResponse);
+    // 是 JSON，智能裁剪
+    const trimmedJson = smartTrimJson(jsonData, MAX_LENGTH);
+    return `原始响应（JSON，原${originalLength.toLocaleString()}字符，已智能裁剪）：\n${trimmedJson}`;
+  } catch {
+    // 不是 JSON，继续处理 HTML
+  }
+
+  // 2. HTML 智能裁剪
+  // 移除不必要的内容
+  trimmed = trimmed
+    // 移除 script 标签及内容
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    // 移除 style 标签及内容
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    // 移除 HTML 注释
+    .replace(/<!--[\s\S]*?-->/g, '')
+    // 移除 SVG
+    .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
+    // 移除 noscript
+    .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '')
+    // 移除 base64 图片数据
+    .replace(/data:image\/[^;]+;base64,[a-zA-Z0-9+/=]+/g, '[base64图片]')
+    // 压缩多余空白
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 3. 根据测试模式提取关键部分
+  let keyParts = '';
+  
+  if (testMode === 'search') {
+    // 搜索模式：尝试提取搜索结果列表区域
+    const listPatterns = [
+      /<ul[^>]*class="[^"]*(?:search|result|list|book)[^"]*"[^>]*>[\s\S]*?<\/ul>/gi,
+      /<div[^>]*class="[^"]*(?:search|result|list|book|item)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+      /<table[^>]*>[\s\S]*?<\/table>/gi,
+    ];
+    for (const pattern of listPatterns) {
+      const matches = trimmed.match(pattern);
+      if (matches && matches.length > 0) {
+        keyParts = matches.slice(0, 3).join('\n...\n');
+        break;
+      }
+    }
+  } else if (testMode === 'toc') {
+    // 目录模式：提取章节列表
+    const tocPatterns = [
+      /<ul[^>]*class="[^"]*(?:chapter|toc|catalog|list)[^"]*"[^>]*>[\s\S]*?<\/ul>/gi,
+      /<div[^>]*class="[^"]*(?:chapter|toc|catalog)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+    ];
+    for (const pattern of tocPatterns) {
+      const matches = trimmed.match(pattern);
+      if (matches && matches.length > 0) {
+        keyParts = matches.slice(0, 2).join('\n...\n');
+        break;
+      }
+    }
+  } else if (testMode === 'content') {
+    // 正文模式：提取正文内容区域
+    const contentPatterns = [
+      /<div[^>]*(?:id|class)="[^"]*(?:content|chapter|article|text|reader)[^"]*"[^>]*>[\s\S]*?<\/div>/gi,
+      /<article[^>]*>[\s\S]*?<\/article>/gi,
+    ];
+    for (const pattern of contentPatterns) {
+      const matches = trimmed.match(pattern);
+      if (matches && matches.length > 0) {
+        keyParts = matches[0].slice(0, MAX_LENGTH / 2);
+        break;
+      }
+    }
+  }
+
+  // 4. 组合结果
+  if (keyParts && keyParts.length > 100) {
+    // 有提取到关键部分
+    const headPart = trimmed.slice(0, 2000);
+    return `原始响应（HTML，原${originalLength.toLocaleString()}字符，已智能裁剪）：
+
+【页面头部结构】
+${headPart}
+...
+
+【关键内容区域】
+${keyParts.slice(0, MAX_LENGTH - 3000)}
+...`;
+  }
+
+  // 5. 没有提取到关键部分，使用首尾裁剪
+  const headLength = Math.floor(MAX_LENGTH * 0.7);
+  const tailLength = Math.floor(MAX_LENGTH * 0.2);
+  
+  return `原始响应（HTML，原${originalLength.toLocaleString()}字符，已裁剪）：
+
+【前${headLength}字符】
+${trimmed.slice(0, headLength)}
+
+...（省略 ${(trimmed.length - headLength - tailLength).toLocaleString()} 字符）...
+
+【后${tailLength}字符】
+${trimmed.slice(-tailLength)}`;
+}
+
+/**
+ * 智能裁剪 JSON 数据
+ */
+function smartTrimJson(data: any, maxLength: number): string {
+  // 如果是数组，只保留前几个元素
+  if (Array.isArray(data)) {
+    const sampleSize = Math.min(5, data.length);
+    const sample = data.slice(0, sampleSize);
+    const result = {
+      _info: `数组共 ${data.length} 项，显示前 ${sampleSize} 项`,
+      data: sample,
+    };
+    let json = JSON.stringify(result, null, 2);
+    if (json.length > maxLength) {
+      // 进一步裁剪每个元素
+      const trimmedSample = sample.map((item: any) => {
+        if (typeof item === 'object' && item !== null) {
+          return trimObject(item, 5); // 只保留前5个字段
+        }
+        return item;
+      });
+      json = JSON.stringify({ _info: result._info, data: trimmedSample }, null, 2);
+    }
+    return json.slice(0, maxLength);
+  }
+
+  // 如果是对象，裁剪字段
+  if (typeof data === 'object' && data !== null) {
+    const trimmedData = trimObject(data, 20);
+    return JSON.stringify(trimmedData, null, 2).slice(0, maxLength);
+  }
+
+  return JSON.stringify(data).slice(0, maxLength);
+}
+
+/**
+ * 裁剪对象，只保留指定数量的字段
+ */
+function trimObject(obj: any, maxFields: number): any {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  
+  const keys = Object.keys(obj);
+  if (keys.length <= maxFields) return obj;
+  
+  const result: any = {};
+  keys.slice(0, maxFields).forEach(key => {
+    const value = obj[key];
+    if (typeof value === 'string' && value.length > 200) {
+      result[key] = value.slice(0, 200) + '...';
+    } else if (Array.isArray(value)) {
+      result[key] = value.slice(0, 3);
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = trimObject(value, 5);
+    } else {
+      result[key] = value;
+    }
+  });
+  result._trimmed = `还有 ${keys.length - maxFields} 个字段未显示`;
+  return result;
+}
+
 export function AIChatPanel() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -320,6 +500,9 @@ export function AIChatPanel() {
           ruleContent: activeSource.ruleContent,
         }, null, 2) : '无';
 
+        // 智能裁剪原始响应数据
+        const trimmedResponse = smartTrimResponse(state.testResult.rawResponse, state.testMode);
+
         // 附加测试结果数据
         finalUserInput = `${userInput}
 
@@ -328,12 +511,12 @@ export function AIChatPanel() {
 测试模式：${state.testMode}
 测试输入：${state.testInput}
 测试结果：${state.testResult.success ? '成功' : '失败'}
+${state.testResult.rawParsedItems ? `解析到 ${Array.isArray(state.testResult.rawParsedItems) ? state.testResult.rawParsedItems.length : 1} 条数据` : ''}
 
 当前书源规则：
 ${sourceInfo}
 
-原始响应HTML（${state.testResult.rawResponse.length.toLocaleString()}字符）：
-${state.testResult.rawResponse.slice(0, 25000)}
+${trimmedResponse}
 ---`;
       }
 

@@ -7,8 +7,6 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getKnowledgeInjector } from './rule-knowledge-injector';
-// 本地模型 - 使用 Transformers.js
-import { getLocalAIService } from './local-ai-service';
 
 // AI 供应商配置
 interface AIProvider {
@@ -103,23 +101,6 @@ const AI_PIPELINE: AIProvider[] = [
       'THUDM/glm-4-9b-chat',           // 智谱 GLM-4 9B
       'internlm/internlm2_5-7b-chat',  // 书生浦语 7B
       'deepseek-ai/DeepSeek-V2.5',     // DeepSeek V2.5
-    ],
-  },
-  {
-    id: 'local',
-    name: 'Transformers.js (本地)',
-    priority: 99, // 最低优先级，作为备用
-    enabled: false,
-    baseUrl: 'local',
-    model: 'Xenova/LaMini-Flan-T5-248M',
-    // Transformers.js 支持的本地模型
-    // 参考: https://huggingface.co/models?library=transformers.js
-    availableModels: [
-      'Xenova/LaMini-Flan-T5-248M',    // 超轻量指令模型
-      'Xenova/flan-t5-small',          // Google Flan-T5 小型版
-      'Xenova/distilgpt2',             // 轻量级 GPT-2
-      'Xenova/gpt2',                   // OpenAI GPT-2
-      'HuggingFaceTB/SmolLM2-135M-Instruct', // 超小型指令模型
     ],
   },
 ];
@@ -268,27 +249,6 @@ class AIService {
   }
 
   /**
-   * 调用本地模型 (Transformers.js)
-   */
-  private async callLocal(messages: ChatMessage[], model: string): Promise<string> {
-    const localService = getLocalAIService();
-    
-    // 确保模型已加载
-    const currentModel = localService.getCurrentModel();
-    if (currentModel !== model) {
-      console.log(`加载本地模型: ${model}`);
-      await localService.loadModel(model);
-    }
-    
-    const result = await localService.chat(messages);
-    if (!result.success) {
-      throw new Error(result.error || '本地模型调用失败');
-    }
-    
-    return result.content || '';
-  }
-
-  /**
    * 调用 GitHub Models API
    */
   private async callGitHub(messages: ChatMessage[], apiKey: string, model: string): Promise<string> {
@@ -385,11 +345,6 @@ class AIService {
    * 调用指定供应商
    */
   private async callProvider(provider: AIProvider, messages: ChatMessage[]): Promise<string> {
-    // 本地模型不需要 API Key
-    if (provider.id === 'local') {
-      return this.callLocal(messages, provider.model || 'Xenova/Qwen1.5-0.5B-Chat');
-    }
-
     if (!provider.apiKey) {
       throw new Error(`${provider.name} 未配置 API Key`);
     }
@@ -417,15 +372,14 @@ class AIService {
    */
   async chat(messages: ChatMessage[]): Promise<AIResponse> {
     // 按优先级排序并过滤启用的供应商
-    // 本地模型不需要 API Key，其他供应商需要
     const enabledProviders = this.providers
-      .filter(p => p.enabled && (p.id === 'local' || p.apiKey))
+      .filter(p => p.enabled && p.apiKey)
       .sort((a, b) => a.priority - b.priority);
 
     if (enabledProviders.length === 0) {
       return {
         success: false,
-        error: '没有可用的 AI 供应商，请在设置中配置 API Key 或启用本地模型',
+        error: '没有可用的 AI 供应商，请在设置中配置 API Key',
       };
     }
 
@@ -509,8 +463,7 @@ class AIService {
   getProviders(): AIProvider[] {
     return this.providers.map(p => ({
       ...p,
-      // 本地模型不需要 API Key，标记为已配置
-      apiKey: p.id === 'local' ? 'local' : (p.apiKey ? '******' : undefined),
+      apiKey: p.apiKey ? '******' : undefined,
     }));
   }
 

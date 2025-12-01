@@ -58,6 +58,26 @@ ipcMain.handle(
 );
 
 /**
+ * 发现测试
+ */
+ipcMain.handle(
+  'debug:explore',
+  async (_event, source: BookSource, exploreUrl: string) => {
+    try {
+      const debugger_ = new SourceDebugger(source);
+      const result = await debugger_.debugExplore(exploreUrl);
+      return result;
+    } catch (error: any) {
+      return {
+        success: false,
+        logs: [],
+        error: error.message || String(error),
+      };
+    }
+  }
+);
+
+/**
  * 书籍详情测试
  */
 ipcMain.handle(
@@ -301,25 +321,45 @@ const createWindow = async () => {
 };
 
 /**
- * Add event listeners...
+ * 单实例锁定 - 确保只能打开一个应用窗口
  */
+const gotTheLock = app.requestSingleInstanceLock();
 
-app.on('window-all-closed', () => {
-  // Respect the OSX convention of having the application in memory even
-  // after all windows have been closed
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+if (!gotTheLock) {
+  // 如果获取不到锁，说明已经有一个实例在运行，直接退出
+  app.quit();
+} else {
+  // 当第二个实例启动时，聚焦到已存在的窗口
+  app.on('second-instance', (_event, _commandLine, _workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.focus();
+    }
+  });
 
-app
-  .whenReady()
-  .then(() => {
-    createWindow();
-    app.on('activate', () => {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
-      if (mainWindow === null) createWindow();
-    });
-  })
-  .catch(console.log);
+  /**
+   * Add event listeners...
+   */
+
+  app.on('window-all-closed', () => {
+    // Respect the OSX convention of having the application in memory even
+    // after all windows have been closed
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
+
+  app
+    .whenReady()
+    .then(() => {
+      createWindow();
+      app.on('activate', () => {
+        // On macOS it's common to re-create a window in the app when the
+        // dock icon is clicked and there are no other windows open.
+        if (mainWindow === null) createWindow();
+      });
+    })
+    .catch(console.log);
+}

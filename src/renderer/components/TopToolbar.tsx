@@ -11,6 +11,7 @@ import {
   Code,
   Sun,
   Moon,
+  Trash2,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Separator } from './ui/separator';
@@ -51,6 +52,7 @@ export function TopToolbar({
     createSource,
     importSources,
     saveCurrentSource,
+    clearAllSources,
     themeMode,
     setThemeMode,
   } = useBookSourceStore();
@@ -92,6 +94,18 @@ export function TopToolbar({
       toast.success('保存成功');
     } else {
       toast.error('保存失败，请检查JSON格式');
+    }
+  };
+
+  // 清空书源
+  const handleClear = () => {
+    if (sources.length === 0) {
+      toast.info('书源列表已为空');
+      return;
+    }
+    if (window.confirm(`确定要清空所有 ${sources.length} 个书源吗？此操作不可恢复！`)) {
+      clearAllSources();
+      toast.success('已清空所有书源');
     }
   };
 
@@ -147,6 +161,21 @@ export function TopToolbar({
               </Button>
             </TooltipTrigger>
             <TooltipContent>导入书源</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                onClick={handleClear}
+                disabled={sources.length === 0}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>清空书源</TooltipContent>
           </Tooltip>
 
           <Tooltip>

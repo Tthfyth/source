@@ -1,8 +1,9 @@
-import React, { useRef, useEffect, useMemo } from 'react';
-import { Trash2, Download, Copy } from 'lucide-react';
+import React, { useRef, useEffect, useMemo, useState } from 'react';
+import { Trash2, Download, Copy, Search, X, Filter } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
+import { Input } from './ui/input';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import { cn } from '../lib/utils';
 import type { LogCategory, DebugLog } from '../types';
@@ -26,12 +27,26 @@ export function DebugConsole() {
     useBookSourceStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [expandedLogId, setExpandedLogId] = React.useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
 
   // 过滤后的日志
   const filteredLogs = useMemo(() => {
-    return debugLogs.filter((log) => logFilters.includes(log.category));
-  }, [debugLogs, logFilters]);
+    let logs = debugLogs.filter((log) => logFilters.includes(log.category));
+    
+    // 搜索过滤
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      logs = logs.filter(
+        (log) =>
+          log.message.toLowerCase().includes(query) ||
+          log.details?.toLowerCase().includes(query)
+      );
+    }
+    
+    return logs;
+  }, [debugLogs, logFilters, searchQuery]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -117,24 +132,72 @@ export function DebugConsole() {
       <div className="flex items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">调试日志</span>
-          <Badge variant="outline" className="text-xs">
-            {filteredLogs.length}
+          <Badge variant="outline" className="text-xs font-mono">
+            {filteredLogs.length}/{debugLogs.length}
           </Badge>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* 搜索框 */}
+          {showSearch ? (
+            <div className="flex items-center gap-1">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="搜索日志..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-7 w-40 pl-7 pr-7 text-xs"
+                  autoFocus
+                />
+                {searchQuery && (
+                  <button
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setSearchQuery('')}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery('');
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setShowSearch(true)}
+              title="搜索日志"
+            >
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          <div className="h-4 w-px bg-border" />
+
           {/* 过滤器 */}
-          <div className="flex gap-1">
+          <div className="flex gap-0.5">
             {(Object.keys(categoryLabels) as LogCategory[]).map((category) => (
               <button
                 key={category}
                 className={cn(
-                  'rounded px-2 py-0.5 text-xs transition-colors',
+                  'rounded px-1.5 py-0.5 text-xs transition-colors',
                   logFilters.includes(category)
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 )}
                 onClick={() => toggleFilter(category)}
+                title={categoryLabels[category]}
               >
                 {categoryLabels[category]}
               </button>
@@ -150,6 +213,7 @@ export function DebugConsole() {
             className="h-7 w-7"
             onClick={copyLogs}
             disabled={!filteredLogs.length}
+            title="复制日志"
           >
             <Copy className="h-3.5 w-3.5" />
           </Button>
@@ -159,6 +223,7 @@ export function DebugConsole() {
             className="h-7 w-7"
             onClick={exportLogs}
             disabled={!filteredLogs.length}
+            title="导出日志"
           >
             <Download className="h-3.5 w-3.5" />
           </Button>
@@ -168,6 +233,7 @@ export function DebugConsole() {
             className="h-7 w-7"
             onClick={clearLogs}
             disabled={!debugLogs.length}
+            title="清空日志"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

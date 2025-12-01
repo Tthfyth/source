@@ -36,6 +36,13 @@ const debugApiHandler = {
   },
 
   /**
+   * 发现测试
+   */
+  explore: (source: any, exploreUrl: string) => {
+    return ipcRenderer.invoke('debug:explore', source, exploreUrl);
+  },
+
+  /**
    * 书籍详情测试
    */
   bookInfo: (source: any, bookUrl: string) => {

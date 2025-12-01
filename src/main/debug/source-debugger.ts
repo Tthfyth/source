@@ -1,6 +1,7 @@
 /**
  * 书源调试器
  * 核心调试引擎，执行书源规则并返回结果
+ * 参考 Legado 实现，确保 100% 兼容
  */
 import { httpRequest, parseHeaders, RequestResult } from './http-client';
 import {
@@ -13,6 +14,7 @@ import {
   formatImageContent,
   resolveUrl,
 } from './rule-parser';
+import { AnalyzeUrl, buildSearchUrl } from './analyze-url';
 import type * as cheerio from 'cheerio';
 
 // 书源类型常量
@@ -29,6 +31,9 @@ export interface BookSource {
   bookSourceName: string;
   bookSourceType: number;
   header?: string;
+  loginUrl?: string;
+  loginUi?: string;
+  jsLib?: string;
   searchUrl?: string;
   exploreUrl?: string;
   ruleSearch?: SearchRule;
@@ -131,6 +136,57 @@ export interface ParsedChapter {
 }
 
 /**
+ * 检测是否为 data URL
+ * data URL 格式: data:;base64,xxx 或 data:application/json;base64,xxx
+ */
+function isDataUrl(url: string): boolean {
+  return url.startsWith('data:');
+}
+
+/**
+ * 解析 data URL
+ * 支持格式:
+ * - data:;base64,xxx,{...}  (大灰狼等书源使用)
+ * - data:application/json;base64,xxx
+ */
+function parseDataUrl(url: string): { data: any; extra?: any } | null {
+  if (!isDataUrl(url)) return null;
+  
+  try {
+    // 格式: data:;base64,xxx,{...}
+    const match = url.match(/^data:[^,]*,([^,]+)(?:,(.+))?$/);
+    if (!match) return null;
+    
+    const base64Part = match[1];
+    const extraPart = match[2];
+    
+    // 解码 base64
+    const decoded = Buffer.from(base64Part, 'base64').toString('utf8');
+    let data: any;
+    try {
+      data = JSON.parse(decoded);
+    } catch {
+      data = decoded;
+    }
+    
+    // 解析额外参数
+    let extra: any;
+    if (extraPart) {
+      try {
+        extra = JSON.parse(extraPart);
+      } catch {
+        extra = extraPart;
+      }
+    }
+    
+    return { data, extra };
+  } catch (e) {
+    console.error('[parseDataUrl] Error:', e);
+    return null;
+  }
+}
+
+/**
  * 书源调试器类
  */
 export class SourceDebugger {
@@ -174,70 +230,220 @@ export class SourceDebugger {
   }
 
   /**
-   * 构建搜索URL
+   * 判断是否为移动端书源
+   * 根据 URL 中是否包含 m. / wap. / mobile. 来判断
    */
-  private buildSearchUrl(keyword: string, page: number = 1): string {
-    let url = this.source.searchUrl || '';
-
-    // 替换关键词
-    url = url.replace(/\{\{key\}\}/g, encodeURIComponent(keyword));
-    url = url.replace(/\{\{page\}\}/g, String(page));
-
-    // 处理相对URL
-    if (url && !url.startsWith('http')) {
-      url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
-    }
-
-    return url;
+  private isMobileSource(): boolean {
+    return /^https?:\/\/(m\.|wap\.|mobile\.)/i.test(this.source.bookSourceUrl || '');
   }
 
   /**
-   * 解析请求头
+   * 构建搜索URL - 使用 AnalyzeUrl 完全兼容 Legado
+   */
+  private buildSearchUrlAnalyze(keyword: string, page: number = 1): AnalyzeUrl | null {
+    return buildSearchUrl(this.source, keyword, page, this.variables);
+  }
+
+  /**
+   * 解析请求头 - 支持 @js: 规则
    */
   private getHeaders(): Record<string, string> {
-    if (this.source.header) {
-      return parseHeaders(this.source.header);
+    if (!this.source.header) {
+      return {};
     }
-    return {};
+
+    let headerStr = this.source.header.trim();
+
+    // 处理 @js: 规则
+    if (headerStr.startsWith('@js:')) {
+      const jsCode = headerStr.substring(4);
+      try {
+        const vm = require('vm');
+        const crypto = require('crypto');
+        const sandbox = {
+          baseUrl: this.getBaseUrl(),
+          source: this.source,
+          java: {
+            get: (key: string) => this.variables[key],
+            put: (key: string, value: any) => {
+              this.variables[key] = value;
+              return value;
+            },
+            // MD5 编码
+            md5Encode: (str: string) => crypto.createHash('md5').update(str).digest('hex'),
+            md5Encode16: (str: string) => crypto.createHash('md5').update(str).digest('hex').substring(8, 24),
+            // Base64 编码
+            base64Encode: (str: string) => Buffer.from(str).toString('base64'),
+            base64Decode: (str: string) => Buffer.from(str, 'base64').toString('utf8'),
+            // 时间戳
+            timeFormat: (time: number, format?: string) => {
+              const d = new Date(time);
+              return d.toISOString();
+            },
+          },
+          JSON,
+          Date,
+          Math,
+          parseInt,
+          parseFloat,
+          encodeURIComponent,
+          decodeURIComponent,
+        };
+        const result = vm.runInNewContext(jsCode, sandbox, { timeout: 5000 });
+        if (typeof result === 'string') {
+          headerStr = result;
+        } else if (typeof result === 'object') {
+          return result as Record<string, string>;
+        }
+      } catch (e) {
+        console.error('[getHeaders] JS execution error:', e);
+        return {};
+      }
+    }
+
+    return parseHeaders(headerStr);
   }
 
   /**
-   * 执行搜索测试
+   * 执行 bookInfoInit 预处理规则
+   * 支持正则 AllInOne 和 JS 规则
+   */
+  private executeBookInfoInit(initRule: string, body: string): any {
+    if (!initRule) return null;
+    
+    const vm = require('vm');
+    const crypto = require('crypto');
+    
+    // 正则 AllInOne 模式 (以 : 开头)
+    if (initRule.startsWith(':')) {
+      const pattern = initRule.substring(1);
+      const regex = new RegExp(pattern);
+      const match = regex.exec(body);
+      if (match) {
+        // 返回捕获组作为对象
+        const result: Record<string, string> = {};
+        for (let i = 1; i < match.length; i++) {
+          result[String.fromCharCode(96 + i)] = match[i] || ''; // a, b, c, ...
+        }
+        return result;
+      }
+      return null;
+    }
+    
+    // JS 规则
+    const jsCode = initRule.startsWith('@js:') ? initRule.substring(4) : initRule;
+    
+    const sandbox = {
+      result: body,
+      baseUrl: this.getBaseUrl(),
+      source: this.source,
+      java: {
+        get: (key: string) => this.variables[key],
+        put: (key: string, value: any) => {
+          this.variables[key] = value;
+          return value;
+        },
+        ajax: (url: string) => {
+          const { syncHttpRequest } = require('./http-client');
+          try {
+            return syncHttpRequest(url).body;
+          } catch {
+            return '';
+          }
+        },
+        base64Decode: (str: string) => Buffer.from(str, 'base64').toString('utf8'),
+        base64Encode: (str: string) => Buffer.from(str).toString('base64'),
+        md5Encode: (str: string) => crypto.createHash('md5').update(str).digest('hex'),
+      },
+      JSON,
+      console,
+    };
+    
+    try {
+      const vmContext = vm.createContext(sandbox);
+      const script = new vm.Script(jsCode);
+      return script.runInContext(vmContext, { timeout: 5000 });
+    } catch (e: any) {
+      console.error('[executeBookInfoInit] JS error:', e.message);
+      return null;
+    }
+  }
+
+  /**
+   * 执行搜索测试 - 完全兼容 Legado
    */
   async debugSearch(keyword: string): Promise<DebugResult> {
     this.logs = [];
 
     try {
-      // 1. 构建搜索URL
-      const searchUrl = this.buildSearchUrl(keyword);
-      if (!searchUrl) {
+      // 1. 使用 AnalyzeUrl 构建搜索URL (兼容 Legado 的 <js>, @js:, {{}} 等语法)
+      const analyzeUrl = this.buildSearchUrlAnalyze(keyword);
+      if (!analyzeUrl) {
         this.log('error', 'error', '搜索URL为空');
         return { success: false, logs: this.logs, error: '搜索URL为空' };
       }
 
+      const searchUrl = analyzeUrl.getUrl();
+      const method = analyzeUrl.getMethod();
+      const headers = { ...this.getHeaders(), ...analyzeUrl.getHeaders() };
+      const body = analyzeUrl.getBody();
+
       this.log('info', 'request', `构建搜索URL: ${searchUrl}`);
 
-      // 2. 发送请求
-      const requestResult = await httpRequest({
-        url: searchUrl,
-        headers: this.getHeaders(),
-      });
+      let responseBody = '';
+      let requestResult: RequestResult | undefined;
 
-      if (!requestResult.success) {
-        this.log('error', 'request', `请求失败: ${requestResult.error}`);
-        return {
-          success: false,
-          logs: this.logs,
-          requestResult,
-          error: requestResult.error,
-        };
+      // 2. 检查是否是 data URL（某些书源用 data URL 传递参数给 ruleSearch）
+      if (searchUrl.startsWith('data:')) {
+        this.log('info', 'request', 'data URL 模式，参数将传递给解析规则');
+        // 从 data URL 中提取数据作为 result
+        // 格式: data:;base64,xxx 或 data:text/plain,xxx
+        const dataMatch = searchUrl.match(/^data:([^,]*),(.*)$/);
+        if (dataMatch) {
+          const [, mimeType, data] = dataMatch;
+          if (mimeType.includes('base64')) {
+            // Base64 编码的数据需要转换为 hex 格式供 JS 解码
+            // Legado 的 bookList JS 使用 java.hexDecodeToString 解码
+            const decoded = Buffer.from(data, 'base64');
+            responseBody = decoded.toString('hex');
+            this.log('info', 'request', `data URL 解码: ${decoded.toString('utf8')}`);
+          } else {
+            responseBody = decodeURIComponent(data);
+          }
+        } else {
+          responseBody = searchUrl;
+        }
+      } else {
+        // 正常 HTTP 请求
+        if (method === 'POST') {
+          this.log('info', 'request', `请求方法: POST, Body: ${body?.substring(0, 200) || '(空)'}`);
+        }
+
+        requestResult = await httpRequest({
+          url: searchUrl,
+          method,
+          headers,
+          body: body || undefined,
+        });
+
+        if (!requestResult.success) {
+          this.log('error', 'request', `请求失败: ${requestResult.error}`);
+          return {
+            success: false,
+            logs: this.logs,
+            requestResult,
+            error: requestResult.error,
+          };
+        }
+
+        this.log(
+          'success',
+          'request',
+          `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
+        );
+        
+        responseBody = requestResult.body || '';
       }
-
-      this.log(
-        'success',
-        'request',
-        `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
-      );
 
       // 3. 解析书籍列表
       const ruleSearch = this.source.ruleSearch;
@@ -251,8 +457,17 @@ export class SourceDebugger {
         };
       }
 
+      // 设置书源相关变量供 JS 规则使用
+      this.variables['_sourceUrl'] = this.getBaseUrl();
+      this.variables['_source'] = this.source;
+      
+      // 加载 jsLib（书源的 JS 库）
+      if (this.source.jsLib) {
+        this.variables['_jsLib'] = this.source.jsLib;
+      }
+
       const ctx: ParseContext = {
-        body: requestResult.body || '',
+        body: responseBody,
         baseUrl: this.getBaseUrl(),
         variables: this.variables,
       };
@@ -282,27 +497,34 @@ export class SourceDebugger {
         // 最多解析20本
         const element = bookList[i];
         const book: ParsedBook = {};
+        
+        // 检查元素是否为 JSON 对象（用于 JSON 规则解析）
+        const isJsonElement = typeof element === 'object' && 
+          !('html' in element && typeof (element as any).html === 'function');
 
-        // 解析各字段
-        const fields: (keyof BookListRule)[] = [
+        // 解析各字段（按顺序，先解析基本字段，再解析可能依赖它们的字段）
+        const basicFields: (keyof BookListRule)[] = [
           'name',
           'author',
           'intro',
           'kind',
           'lastChapter',
           'updateTime',
-          'bookUrl',
           'coverUrl',
           'wordCount',
         ];
-
-        for (const field of fields) {
+        
+        // 先解析基本字段
+        for (const field of basicFields) {
           const rule = ruleSearch[field];
           if (rule) {
+            // 传递已解析的书籍数据作为变量（用于 JS 规则）
+            const variables = isJsonElement ? { _jsResult: element } : {};
             const result = parseFromElement(
               element as cheerio.Cheerio<any>,
               rule,
-              this.getBaseUrl()
+              this.getBaseUrl(),
+              variables
             );
             if (result.success && result.data) {
               (book as any)[field] = Array.isArray(result.data)
@@ -311,7 +533,7 @@ export class SourceDebugger {
               this.log(
                 'success',
                 'field',
-                `[${i + 1}] ${field}: ${(book as any)[field]}`
+                `[${i + 1}] ${field}: ${String((book as any)[field]).slice(0, 50)}`
               );
             } else if (result.error) {
               this.log(
@@ -319,6 +541,198 @@ export class SourceDebugger {
                 'field',
                 `[${i + 1}] ${field} 解析失败: ${result.error}`
               );
+            }
+          }
+        }
+        
+        // 再解析 bookUrl（可能依赖其他字段）
+        const bookUrlRule = ruleSearch.bookUrl;
+        if (bookUrlRule) {
+          // 将已解析的书籍数据和原始元素数据合并，传递给 JS 规则
+          const jsResultData = isJsonElement ? { ...element as object, ...book } : book;
+          const variables = { _jsResult: jsResultData, _book: book };
+          const result = parseFromElement(
+            element as cheerio.Cheerio<any>,
+            bookUrlRule,
+            this.getBaseUrl(),
+            variables
+          );
+          if (result.success && result.data) {
+            book.bookUrl = Array.isArray(result.data)
+              ? result.data[0]
+              : result.data;
+            this.log(
+              'success',
+              'field',
+              `[${i + 1}] bookUrl: ${String(book.bookUrl).slice(0, 80)}`
+            );
+          } else if (result.error) {
+            this.log(
+              'warning',
+              'field',
+              `[${i + 1}] bookUrl 解析失败: ${result.error}`
+            );
+          }
+        }
+
+        if (book.name || book.bookUrl) {
+          parsedBooks.push(book);
+        }
+      }
+
+      this.log('success', 'parse', `成功解析 ${parsedBooks.length} 本书籍`);
+
+      return {
+        success: true,
+        logs: this.logs,
+        requestResult,
+        parsedItems: parsedBooks,
+      };
+    } catch (error: any) {
+      this.log('error', 'error', `调试异常: ${error.message}`);
+      return { success: false, logs: this.logs, error: error.message };
+    }
+  }
+
+  /**
+   * 执行发现测试
+   * exploreUrl 格式: 分类名称::URL 或直接 URL
+   */
+  async debugExplore(exploreUrl: string): Promise<DebugResult> {
+    this.logs = [];
+
+    try {
+      // 解析 exploreUrl - 可能是 "分类名::URL" 格式
+      let url = exploreUrl;
+      let categoryName = '';
+      
+      if (exploreUrl.includes('::')) {
+        const parts = exploreUrl.split('::');
+        categoryName = parts[0];
+        url = parts[1];
+        this.log('info', 'request', `发现分类: ${categoryName}`);
+      }
+
+      // 如果没有提供 URL，尝试从 source.exploreUrl 解析
+      if (!url && this.source.exploreUrl) {
+        // exploreUrl 格式: 分类1::url1\n分类2::url2
+        const lines = this.source.exploreUrl.split('\n').filter(l => l.trim());
+        if (lines.length > 0) {
+          const firstLine = lines[0];
+          if (firstLine.includes('::')) {
+            url = firstLine.split('::')[1];
+          } else {
+            url = firstLine;
+          }
+        }
+      }
+
+      if (!url) {
+        this.log('error', 'error', '发现URL为空');
+        return { success: false, logs: this.logs, error: '发现URL为空' };
+      }
+
+      // 构建完整 URL
+      if (!url.startsWith('http')) {
+        url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
+      }
+
+      this.log('info', 'request', `请求发现页: ${url}`);
+
+      // 发送请求
+      const requestResult = await httpRequest({
+        url,
+        headers: this.getHeaders(),
+      });
+
+      if (!requestResult.success) {
+        this.log('error', 'request', `请求失败: ${requestResult.error}`);
+        return {
+          success: false,
+          logs: this.logs,
+          requestResult,
+          error: requestResult.error,
+        };
+      }
+
+      this.log(
+        'success',
+        'request',
+        `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
+      );
+
+      const responseBody = requestResult.body || '';
+
+      // 使用 ruleExplore 或 ruleSearch 解析
+      const ruleExplore = this.source.ruleExplore || this.source.ruleSearch;
+      if (!ruleExplore) {
+        this.log('warning', 'parse', '未配置发现规则，尝试使用搜索规则');
+        return {
+          success: true,
+          logs: this.logs,
+          requestResult,
+          parsedItems: [],
+        };
+      }
+
+      // 存储 jsLib
+      if (this.source.jsLib) {
+        this.variables['_jsLib'] = this.source.jsLib;
+      }
+
+      const ctx: ParseContext = {
+        body: responseBody,
+        baseUrl: this.getBaseUrl(),
+        variables: this.variables,
+      };
+
+      // 解析书籍列表
+      const bookList = parseList(ctx, ruleExplore.bookList || '');
+      this.log(
+        'info',
+        'parse',
+        `书籍列表规则 "${ruleExplore.bookList}" 匹配到 ${bookList.length} 个元素`
+      );
+
+      if (bookList.length === 0) {
+        this.log('warning', 'parse', '未匹配到任何书籍');
+        return {
+          success: true,
+          logs: this.logs,
+          requestResult,
+          parsedItems: [],
+        };
+      }
+
+      // 解析每本书的字段
+      const parsedBooks: ParsedBook[] = [];
+
+      for (let i = 0; i < Math.min(bookList.length, 20); i++) {
+        const element = bookList[i];
+        const book: ParsedBook = {};
+        
+        const isJsonElement = typeof element === 'object' && 
+          !('html' in element && typeof (element as any).html === 'function');
+
+        const fields: (keyof BookListRule)[] = [
+          'name', 'author', 'intro', 'kind', 'lastChapter',
+          'updateTime', 'coverUrl', 'wordCount', 'bookUrl',
+        ];
+
+        for (const field of fields) {
+          const rule = ruleExplore[field];
+          if (rule) {
+            const variables = isJsonElement ? { _jsResult: element } : {};
+            const result = parseFromElement(
+              element as cheerio.Cheerio<any>,
+              rule,
+              this.getBaseUrl(),
+              variables
+            );
+            if (result.success && result.data) {
+              (book as any)[field] = Array.isArray(result.data)
+                ? result.data[0]
+                : result.data;
             }
           }
         }
@@ -344,40 +758,73 @@ export class SourceDebugger {
 
   /**
    * 执行书籍详情测试
+   * 支持普通 URL 和 data URL
+   * data URL 格式: data:;base64,xxx - 解码后的数据直接作为响应体供规则解析
    */
   async debugBookInfo(bookUrl: string): Promise<DebugResult> {
     this.logs = [];
 
     try {
-      // 处理相对URL
-      let url = bookUrl;
-      if (!url.startsWith('http')) {
-        url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
+      let requestResult: RequestResult | undefined;
+      let body = '';
+      
+      // 检查是否为 data URL
+      if (isDataUrl(bookUrl)) {
+        const parsed = parseDataUrl(bookUrl);
+        if (parsed) {
+          this.log('info', 'request', `解析 data URL`);
+          
+          // 将 data URL 中的数据存入变量，供规则使用
+          this.variables['_dataUrlData'] = parsed.data;
+          this.variables['_dataUrlExtra'] = parsed.extra;
+          
+          // data URL 解码后的数据直接作为响应体
+          body = typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data);
+          requestResult = {
+            success: true,
+            statusCode: 200,
+            body,
+            headers: {},
+            responseTime: 0,
+          };
+          
+          this.log('success', 'request', `data URL 解码成功，数据长度: ${body.length}`);
+        } else {
+          this.log('error', 'request', 'data URL 解析失败');
+          return { success: false, logs: this.logs, error: 'data URL 解析失败' };
+        }
+      } else {
+        // 普通 URL 处理
+        let url = bookUrl;
+        if (!url.startsWith('http')) {
+          url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
+        }
+
+        this.log('info', 'request', `请求书籍详情: ${url}`);
+
+        requestResult = await httpRequest({
+          url,
+          headers: this.getHeaders(),
+        });
+        
+        body = requestResult.body || '';
+        
+        if (!requestResult.success) {
+          this.log('error', 'request', `请求失败: ${requestResult.error}`);
+          return {
+            success: false,
+            logs: this.logs,
+            requestResult,
+            error: requestResult.error,
+          };
+        }
+
+        this.log(
+          'success',
+          'request',
+          `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
+        );
       }
-
-      this.log('info', 'request', `请求书籍详情: ${url}`);
-
-      // 发送请求
-      const requestResult = await httpRequest({
-        url,
-        headers: this.getHeaders(),
-      });
-
-      if (!requestResult.success) {
-        this.log('error', 'request', `请求失败: ${requestResult.error}`);
-        return {
-          success: false,
-          logs: this.logs,
-          requestResult,
-          error: requestResult.error,
-        };
-      }
-
-      this.log(
-        'success',
-        'request',
-        `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
-      );
 
       // 解析书籍信息
       const ruleBookInfo = this.source.ruleBookInfo;
@@ -391,8 +838,25 @@ export class SourceDebugger {
         };
       }
 
+      // 处理 bookInfoInit 预处理规则
+      let processedBody = body;
+      if (ruleBookInfo.init) {
+        this.log('info', 'parse', '执行 bookInfoInit 预处理规则');
+        try {
+          const initResult = this.executeBookInfoInit(ruleBookInfo.init, body);
+          if (initResult) {
+            // 如果返回 JSON 对象，存储供后续规则使用
+            this.variables['_bookInfoInit'] = initResult;
+            processedBody = typeof initResult === 'string' ? initResult : JSON.stringify(initResult);
+            this.log('success', 'parse', 'bookInfoInit 预处理成功');
+          }
+        } catch (e: any) {
+          this.log('warning', 'parse', `bookInfoInit 执行失败: ${e.message}`);
+        }
+      }
+
       const ctx: ParseContext = {
-        body: requestResult.body || '',
+        body: processedBody,
         baseUrl: this.getBaseUrl(),
         variables: this.variables,
       };
@@ -439,38 +903,72 @@ export class SourceDebugger {
 
   /**
    * 执行目录测试
+   * 支持普通 URL 和 data URL
+   * data URL 格式: data:;base64,xxx - 解码后的数据直接作为响应体供规则解析
    */
   async debugToc(tocUrl: string): Promise<DebugResult> {
     this.logs = [];
 
     try {
-      let url = tocUrl;
-      if (!url.startsWith('http')) {
-        url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
+      let requestResult: RequestResult | undefined;
+      let body = '';
+      
+      // 检查是否为 data URL
+      if (isDataUrl(tocUrl)) {
+        const parsed = parseDataUrl(tocUrl);
+        if (parsed) {
+          this.log('info', 'request', `解析 data URL`);
+          
+          this.variables['_dataUrlData'] = parsed.data;
+          this.variables['_dataUrlExtra'] = parsed.extra;
+          
+          // data URL 解码后的数据直接作为响应体
+          body = typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data);
+          requestResult = {
+            success: true,
+            statusCode: 200,
+            body,
+            headers: {},
+            responseTime: 0,
+          };
+          
+          this.log('success', 'request', `data URL 解码成功，数据长度: ${body.length}`);
+        } else {
+          this.log('error', 'request', 'data URL 解析失败');
+          return { success: false, logs: this.logs, error: 'data URL 解析失败' };
+        }
+      } else {
+        // 普通 URL 处理
+        let url = tocUrl;
+        if (!url.startsWith('http')) {
+          url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
+        }
+
+        this.log('info', 'request', `请求目录: ${url}`);
+
+        requestResult = await httpRequest({
+          url,
+          headers: this.getHeaders(),
+        });
+        
+        body = requestResult.body || '';
+        
+        if (!requestResult.success) {
+          this.log('error', 'request', `请求失败: ${requestResult.error}`);
+          return {
+            success: false,
+            logs: this.logs,
+            requestResult,
+            error: requestResult.error,
+          };
+        }
+
+        this.log(
+          'success',
+          'request',
+          `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
+        );
       }
-
-      this.log('info', 'request', `请求目录: ${url}`);
-
-      const requestResult = await httpRequest({
-        url,
-        headers: this.getHeaders(),
-      });
-
-      if (!requestResult.success) {
-        this.log('error', 'request', `请求失败: ${requestResult.error}`);
-        return {
-          success: false,
-          logs: this.logs,
-          requestResult,
-          error: requestResult.error,
-        };
-      }
-
-      this.log(
-        'success',
-        'request',
-        `请求成功 ${requestResult.statusCode} (${requestResult.responseTime}ms)`
-      );
 
       const ruleToc = this.source.ruleToc;
       if (!ruleToc) {
@@ -484,7 +982,7 @@ export class SourceDebugger {
       }
 
       const ctx: ParseContext = {
-        body: requestResult.body || '',
+        body,
         baseUrl: this.getBaseUrl(),
         variables: this.variables,
       };
@@ -562,8 +1060,9 @@ export class SourceDebugger {
 
   /**
    * 执行正文测试
+   * 支持普通 HTTP 请求和 WebView 渲染
    */
-  async debugContent(contentUrl: string): Promise<DebugResult> {
+  async debugContent(contentUrl: string, useWebView: boolean = false): Promise<DebugResult> {
     this.logs = [];
 
     try {
@@ -572,12 +1071,51 @@ export class SourceDebugger {
         url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
       }
 
-      this.log('info', 'request', `请求正文: ${url}`);
+      this.log('info', 'request', `请求正文: ${url}${useWebView ? ' (WebView)' : ''}`);
 
-      const requestResult = await httpRequest({
-        url,
-        headers: this.getHeaders(),
-      });
+      let requestResult: RequestResult;
+      
+      if (useWebView) {
+        // 使用 WebView 获取渲染后的页面
+        try {
+          const { webView } = require('./webview');
+          const webViewResult = await webView({
+            url,
+            headers: this.getHeaders(),
+            delayTime: 2000, // 等待 JS 渲染
+            isMobile: this.isMobileSource(), // 根据书源自动判断
+          });
+          
+          if (webViewResult.success) {
+            requestResult = {
+              success: true,
+              statusCode: 200,
+              body: webViewResult.body,
+              headers: {},
+              responseTime: 0,
+            };
+            this.log('success', 'request', 'WebView 渲染成功');
+          } else {
+            this.log('warning', 'request', `WebView 失败: ${webViewResult.error}`);
+            // 降级到普通请求
+            requestResult = await httpRequest({
+              url,
+              headers: this.getHeaders(),
+            });
+          }
+        } catch (e: any) {
+          this.log('warning', 'request', `WebView 异常: ${e.message}`);
+          requestResult = await httpRequest({
+            url,
+            headers: this.getHeaders(),
+          });
+        }
+      } else {
+        requestResult = await httpRequest({
+          url,
+          headers: this.getHeaders(),
+        });
+      }
 
       if (!requestResult.success) {
         this.log('error', 'request', `请求失败: ${requestResult.error}`);
@@ -628,24 +1166,31 @@ export class SourceDebugger {
           this.log('warning', 'field', `正文解析失败: ${result.error}`);
         }
 
-        // 如果正文为空，尝试用 text 属性重新解析
-        if (!content && ruleContent.content) {
+        // 如果正文为空或太短，尝试用 text 属性重新解析
+        if ((!content || content.length < 100) && ruleContent.content) {
           const textRule = ruleContent.content
             .replace(/@textNodes$/, '@text')
             .replace(/@html$/, '@text');
           const textResult = parseRule(ctx, textRule);
           if (textResult.success && textResult.data) {
-            if (Array.isArray(textResult.data)) {
-              content = textResult.data.filter(Boolean).join('\n');
-            } else {
-              content = String(textResult.data);
+            const textContent = Array.isArray(textResult.data) 
+              ? textResult.data.filter(Boolean).join('\n')
+              : String(textResult.data);
+            if (textContent.length > content.length) {
+              content = textContent;
+              this.log(
+                'info',
+                'field',
+                `使用 text 属性重新解析，长度: ${content.length}`
+              );
             }
-            this.log(
-              'info',
-              'field',
-              `使用 text 属性重新解析，长度: ${content.length}`
-            );
           }
+        }
+        
+        // 如果正文仍然太短且未使用 WebView，尝试用 WebView 重新获取
+        if (content.length < 100 && !useWebView) {
+          this.log('info', 'parse', '正文太短，尝试使用 WebView 重新获取');
+          return this.debugContent(contentUrl, true);
         }
       }
 
@@ -683,14 +1228,28 @@ export class SourceDebugger {
         try {
           const replaceRules = ruleContent.replaceRegex.split('\n');
           for (const rule of replaceRules) {
-            if (rule.includes('##')) {
+            if (!rule.trim()) continue;
+            
+            // 格式: ##regex##replacement 或 ##regex (删除匹配内容)
+            if (rule.startsWith('##')) {
+              // 以 ## 开头，表示删除匹配的内容
+              const parts = rule.substring(2).split('##');
+              const pattern = parts[0];
+              const replacement = parts[1] || '';
+              if (pattern) {
+                content = content.replace(new RegExp(pattern, 'g'), replacement);
+              }
+            } else if (rule.includes('##')) {
+              // 中间有 ##，格式: pattern##replacement
               const [pattern, replacement] = rule.split('##');
-              content = content.replace(new RegExp(pattern, 'g'), replacement || '');
+              if (pattern) {
+                content = content.replace(new RegExp(pattern, 'g'), replacement || '');
+              }
             }
           }
           this.log('info', 'parse', '已应用替换规则');
-        } catch {
-          this.log('warning', 'parse', '替换规则执行失败');
+        } catch (e: any) {
+          this.log('warning', 'parse', `替换规则执行失败: ${e.message}`);
         }
       }
 

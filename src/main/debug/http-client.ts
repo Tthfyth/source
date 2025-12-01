@@ -13,6 +13,8 @@ export interface RequestOptions {
   charset?: string;
   timeout?: number;
   followRedirects?: boolean;
+  // 代理设置: http://host:port, socks5://host:port, socks5://host:port@user@pass
+  proxy?: string;
 }
 
 export interface RequestResult {
@@ -43,6 +45,7 @@ const createClient = (timeout: number = 30000): AxiosInstance => {
     maxRedirects: 5,
     validateStatus: () => true, // 不抛出 HTTP 错误
     responseType: 'arraybuffer', // 获取原始数据以便处理编码
+    decompress: true, // 自动解压 gzip/deflate
     headers: DEFAULT_HEADERS,
   });
 };
@@ -87,6 +90,114 @@ function decodeBody(body: Buffer, charset: string): string {
 }
 
 /**
+ * 需要过滤的无效请求头（HTTP/2 伪头部等）
+ */
+const INVALID_HEADERS = [
+  ':authority',
+  ':method',
+  ':path',
+  ':scheme',
+  ':status',
+  'host', // 由 axios 自动处理
+];
+
+/**
+ * 清理请求头键名（移除多余的引号等）
+ */
+function cleanHeaderKey(key: string): string {
+  // 移除首尾的引号
+  return key.replace(/^["']+|["']+$/g, '').trim();
+}
+
+/**
+ * 验证 HTTP 头部名称是否有效
+ * HTTP token 只能包含: ! # $ % & ' * + - . ^ _ ` | ~ 和字母数字
+ */
+function isValidHeaderName(name: string): boolean {
+  // HTTP token 正则
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+}
+
+/**
+ * 过滤无效的请求头
+ */
+function filterHeaders(headers: Record<string, string>): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    // 清理键名
+    const cleanKey = cleanHeaderKey(key);
+    if (!cleanKey) continue;
+    
+    // 过滤掉无效的头部名称
+    const lowerKey = cleanKey.toLowerCase();
+    // 跳过: HTTP/2 伪头部、@js 等规则标记、空值
+    if (
+      !INVALID_HEADERS.includes(lowerKey) && 
+      !cleanKey.startsWith(':') &&
+      !cleanKey.startsWith('@') &&  // 过滤 @js 等规则
+      !cleanKey.startsWith('<') &&  // 过滤 <js> 等规则
+      isValidHeaderName(cleanKey)   // 验证是否为有效的 HTTP token
+    ) {
+      // 清理值中的引号和换行
+      let cleanValue = typeof value === 'string' 
+        ? value.replace(/^["']+|["']+$/g, '').trim()
+        : String(value);
+      // 移除值中的换行符（HTTP 头部值不能包含换行）
+      cleanValue = cleanValue.replace(/[\r\n]+/g, ' ');
+      if (cleanValue) {
+        filtered[cleanKey] = cleanValue;
+      }
+    }
+  }
+  return filtered;
+}
+
+/**
+ * 解析代理字符串
+ * 支持格式:
+ * - http://host:port
+ * - https://host:port
+ * - socks5://host:port
+ * - socks5://host:port@user@pass
+ */
+function parseProxy(proxyStr: string): AxiosRequestConfig['proxy'] | null {
+  if (!proxyStr) return null;
+  
+  try {
+    // 解析代理 URL
+    // 格式: protocol://host:port 或 protocol://host:port@user@pass
+    const match = proxyStr.match(/^(https?|socks[45]?):\/\/([^:@]+):(\d+)(?:@([^@]+)@(.+))?$/i);
+    if (!match) {
+      console.warn('[HTTP] 无效的代理格式:', proxyStr);
+      return null;
+    }
+    
+    const [, protocol, host, port, username, password] = match;
+    
+    // axios 原生只支持 http/https 代理
+    // socks 代理需要额外的库支持 (如 socks-proxy-agent)
+    if (protocol.toLowerCase().startsWith('socks')) {
+      console.warn('[HTTP] SOCKS 代理需要额外配置，当前使用 HTTP 代理模式');
+    }
+    
+    const proxyConfig: AxiosRequestConfig['proxy'] = {
+      host,
+      port: parseInt(port, 10),
+      protocol: protocol.toLowerCase().startsWith('socks') ? 'http' : protocol.toLowerCase(),
+    };
+    
+    if (username && password) {
+      proxyConfig.auth = { username, password };
+    }
+    
+    return proxyConfig;
+  } catch (e) {
+    console.warn('[HTTP] 解析代理失败:', e);
+    return null;
+  }
+}
+
+/**
  * 解析请求头字符串
  */
 export function parseHeaders(headerStr: string): Record<string, string> {
@@ -97,7 +208,8 @@ export function parseHeaders(headerStr: string): Record<string, string> {
     // 尝试解析 JSON 格式
     const parsed = JSON.parse(headerStr);
     if (typeof parsed === 'object') {
-      return parsed;
+      // 过滤无效头部
+      return filterHeaders(parsed);
     }
   } catch {
     // 尝试解析 key: value 格式
@@ -105,7 +217,11 @@ export function parseHeaders(headerStr: string): Record<string, string> {
     for (const line of lines) {
       const [key, ...valueParts] = line.split(':');
       if (key && valueParts.length > 0) {
-        headers[key.trim()] = valueParts.join(':').trim();
+        const trimmedKey = key.trim();
+        // 跳过无效头部
+        if (!trimmedKey.startsWith(':') && !INVALID_HEADERS.includes(trimmedKey.toLowerCase())) {
+          headers[trimmedKey] = valueParts.join(':').trim();
+        }
       }
     }
   }
@@ -124,15 +240,26 @@ export async function httpRequest(
   try {
     const client = createClient(options.timeout || 30000);
 
+    // 过滤无效的请求头
+    const filteredHeaders = options.headers ? filterHeaders(options.headers) : {};
+
     // 构建请求配置
     const config: AxiosRequestConfig = {
       url: options.url,
       method: options.method || 'GET',
       headers: {
         ...DEFAULT_HEADERS,
-        ...options.headers,
+        ...filteredHeaders,
       },
     };
+
+    // 处理代理设置
+    if (options.proxy) {
+      const proxyConfig = parseProxy(options.proxy);
+      if (proxyConfig) {
+        config.proxy = proxyConfig;
+      }
+    }
 
     // 处理请求体
     if (options.body) {

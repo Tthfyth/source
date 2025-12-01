@@ -142,7 +142,7 @@ export interface DebugLog {
 }
 
 // 测试模式
-export type TestMode = 'search' | 'detail' | 'toc' | 'content';
+export type TestMode = 'search' | 'explore' | 'detail' | 'toc' | 'content';
 
 // 测试结果
 export interface TestResult {

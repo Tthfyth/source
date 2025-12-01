@@ -122,9 +122,11 @@ interface BookSourceState {
   deleteSource: (url: string) => void;
   importSources: (jsonStr: string) => number;
   exportSources: (urls?: string[]) => string;
+  clearAllSources: () => void;
   addLog: (log: Omit<DebugLog, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
   runTest: () => Promise<void>;
+  runTestWithParams: (mode: TestMode, input: string) => Promise<void>;
   toggleSourceEnabled: (url: string) => void;
   setTestMode: (mode: TestMode) => void;
   setTestInput: (input: string) => void;
@@ -339,6 +341,15 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
     return JSON.stringify(toExport, null, 2);
   },
 
+  clearAllSources: () => {
+    set({
+      sources: [],
+      activeSourceId: null,
+      sourceCode: '',
+      isModified: false,
+    });
+  },
+
   addLog: (log: Omit<DebugLog, 'id' | 'timestamp'>) => {
     set((state) => {
       let logs = [
@@ -425,6 +436,9 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
         case 'search':
           result = (await window.debugApi.search(currentSource, state.testInput)) as DebugResult;
           break;
+        case 'explore':
+          result = (await window.debugApi.explore(currentSource, state.testInput)) as DebugResult;
+          break;
         case 'detail':
           result = (await window.debugApi.bookInfo(currentSource, state.testInput)) as DebugResult;
           break;
@@ -493,6 +507,14 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  // 使用指定参数运行测试（用于点击跳转）
+  runTestWithParams: async (mode: TestMode, input: string) => {
+    // 先更新状态
+    set({ testMode: mode, testInput: input });
+    // 然后执行测试
+    await get().runTest();
   },
 
   toggleSourceEnabled: (url: string) => {
@@ -574,6 +596,7 @@ declare global {
   interface Window {
     debugApi?: {
       search: (source: BookSource, keyword: string) => Promise<unknown>;
+      explore: (source: BookSource, exploreUrl: string) => Promise<unknown>;
       bookInfo: (source: BookSource, bookUrl: string) => Promise<unknown>;
       toc: (source: BookSource, tocUrl: string) => Promise<unknown>;
       content: (source: BookSource, contentUrl: string) => Promise<unknown>;

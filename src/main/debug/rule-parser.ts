@@ -642,21 +642,71 @@ function parseCss(html: string, rule: string, baseUrl: string): any[] {
   let selectorParts: string[] = [];
 
   // 从后往前找属性
-  if (parts.length > 1) {
+  // 如果只有一个部分且是属性名，则整个规则就是属性
+  if (parts.length === 1) {
+    const onlyPart = parts[0].toLowerCase();
+    if (attrNames.includes(onlyPart) || onlyPart.startsWith('data-')) {
+      attr = parts[0];
+      selectorParts = [];
+    } else {
+      selectorParts = parts;
+    }
+  } else if (parts.length > 1) {
     const lastPart = parts[parts.length - 1].toLowerCase();
     if (attrNames.includes(lastPart) || lastPart.startsWith('data-')) {
       attr = parts.pop()!;
     }
+    selectorParts = parts;
+  } else {
+    selectorParts = parts;
   }
-  selectorParts = parts;
 
   // 执行链式选择
-  let elements: cheerio.Cheerio<any> = $.root();
+  let elements: cheerio.Cheerio<any>;
+  
+  // 如果没有选择器，选择根元素的直接子元素（通常是 body 的内容）
+  if (selectorParts.length === 0 || (selectorParts.length === 1 && !selectorParts[0])) {
+    // 尝试获取 body 内容，如果没有 body 则获取所有顶级元素
+    const body = $('body');
+    if (body.length > 0) {
+      elements = body.children();
+      // 如果 body 只有一个子元素，直接使用它
+      if (elements.length === 1) {
+        elements = $(elements[0]);
+      } else if (elements.length === 0) {
+        // body 为空，尝试获取 body 本身的文本
+        elements = body;
+      }
+    } else {
+      // 没有 body，获取根元素的直接子元素
+      elements = $.root().children();
+      if (elements.length === 1) {
+        elements = $(elements[0]);
+      }
+    }
+  } else {
+    elements = $.root();
+    for (const selectorPart of selectorParts) {
+      if (!selectorPart) continue;
+      elements = selectWithLegadoSyntax($, elements, selectorPart);
+      if (elements.length === 0) break;
+    }
+  }
 
-  for (const selectorPart of selectorParts) {
-    if (!selectorPart) continue;
-    elements = selectWithLegadoSyntax($, elements, selectorPart);
-    if (elements.length === 0) break;
+  // 如果选择器没有找到元素，回退到根元素的第一个子元素
+  // 这处理了规则和 bookList 相同的情况
+  if (elements.length === 0 && selectorParts.length > 0) {
+    const body = $('body');
+    if (body.length > 0) {
+      const children = body.children();
+      if (children.length === 1) {
+        elements = $(children[0]);
+      } else if (children.length > 1) {
+        elements = children;
+      } else {
+        elements = body;
+      }
+    }
   }
 
   // 执行选择
@@ -739,8 +789,13 @@ function parseJson(json: string | object, rule: string): any[] {
       path = '$.' + path;
     }
 
-    const results = JSONPath({ path, json: data, wrap: true });
-    return Array.isArray(results) ? results : [results];
+    const results = JSONPath({ path, json: data, wrap: false });
+    
+    // 如果结果是数组，直接返回；否则包装成数组
+    if (Array.isArray(results)) {
+      return results;
+    }
+    return results !== undefined ? [results] : [];
   } catch {
     return [];
   }
@@ -1074,6 +1129,41 @@ function createSymmetricCrypto(
 }
 
 /**
+ * 将 Rhino JS 特有语法转换为标准 ES6 语法
+ */
+function convertRhinoToES6(code: string): string {
+  let result = code;
+  
+  // 1. 转换 let 表达式: let (x = value) expr -> ((x) => expr)(value)
+  // 复杂情况: if (let (list = $.data) list != 0) { -> if (((list) => list != 0)($.data)) {
+  result = result.replace(
+    /let\s*\(\s*(\w+)\s*=\s*([^)]+)\)\s*([^;{\n)]+)/g,
+    (match, varName, value, expr) => {
+      const cleanExpr = expr.trim();
+      return `((${varName}) => ${cleanExpr})(${value})`;
+    }
+  );
+  
+  // 2. 转换 for each 语法: for each (x in arr) -> for (let x of arr)
+  result = result.replace(
+    /for\s+each\s*\(\s*((?:var|let|const)?\s*\w+)\s+in\s+/g,
+    'for ($1 of '
+  );
+  
+  // 3. 转换 Java 风格的数组声明
+  result = result.replace(/new\s+[\w.]+\[\]/g, '[]');
+  
+  // 4. 转换 with 语句中的 JavaImporter
+  result = result.replace(/with\s*\(\s*\w+\s*\)\s*\{/g, '{');
+  
+  // 5. 处理 Java 类型转换
+  result = result.replace(/\(java\.lang\.String\)\s*(\w+)/g, 'String($1)');
+  result = result.replace(/\(java\.lang\.Integer\)\s*(\w+)/g, 'parseInt($1)');
+  
+  return result;
+}
+
+/**
  * JavaScript 规则执行
  * 使用 Node.js 内置 vm 模块
  * 完整实现 Legado JsExtensions 接口
@@ -1088,11 +1178,53 @@ function executeJs(
   }
 ): any {
   try {
+    // 转换 Rhino JS 语法为标准 ES6
+    const convertedCode = convertRhinoToES6(code);
+    
     // 创建沙箱环境 - 完整实现 Legado java 对象
+    // 如果有 _jsResult，使用它作为 result（用于 bookUrl 等 JS 规则）
+    const jsResult = context.variables._jsResult || context.result;
+    
     const sandbox = {
-      result: context.result,
+      result: jsResult,
       src: context.src,
       baseUrl: context.baseUrl,
+      
+      // book 对象 - 当前解析的书籍信息
+      book: context.variables._book || {
+        name: '',
+        author: '',
+        kind: '',
+        intro: '',
+        wordCount: '',
+        lastChapter: '',
+        tocUrl: '',
+        bookUrl: '',
+        coverUrl: '',
+        customTag: '',
+        canUpdate: true,
+        variable: '',
+        getVariable: () => context.variables._bookVariable || '',
+        putVariable: (key: string, value: any) => {
+          context.variables._bookVariable = value;
+          return value;
+        },
+      },
+      
+      // chapter 对象 - 当前解析的章节信息
+      chapter: context.variables._chapter || {
+        title: '',
+        url: '',
+        index: 0,
+        isVip: false,
+        isPay: false,
+        variable: '',
+        getVariable: () => context.variables._chapterVariable || '',
+        putVariable: (key: string, value: any) => {
+          context.variables._chapterVariable = value;
+          return value;
+        },
+      },
 
       /**
        * java 对象 - 模拟 Legado JsExtensions
@@ -1100,7 +1232,7 @@ function executeJs(
        */
       java: {
         // ==================== 变量存取 ====================
-        getString: (key: string) => context.variables[key] || '',
+        getVar: (key: string) => context.variables[key] || '',
         put: (key: string, value: any) => {
           context.variables[key] = value;
           return value;
@@ -1374,27 +1506,84 @@ function executeJs(
 
         // ==================== 中文转换 ====================
         t2s: (text: string) => {
-          // 繁体转简体 - 需要额外库支持
-          console.warn('[JS] java.t2s() 需要中文转换库支持');
-          return text;
+          // 繁体转简体 - 简单映射表
+          const t2sMap: Record<string, string> = {
+            '書': '书', '說': '说', '話': '话', '開': '开', '門': '门',
+            '電': '电', '腦': '脑', '網': '网', '頁': '页', '機': '机',
+            '時': '时', '間': '间', '東': '东', '車': '车', '長': '长',
+            '學': '学', '習': '习', '國': '国', '語': '语', '見': '见',
+            '觀': '观', '視': '视', '聽': '听', '讀': '读', '寫': '写',
+            '買': '买', '賣': '卖', '錢': '钱', '銀': '银', '飛': '飞',
+            '場': '场', '運': '运', '動': '动', '體': '体', '會': '会',
+            '議': '议', '論': '论', '無': '无', '為': '为', '從': '从',
+          };
+          let result = text;
+          for (const [t, s] of Object.entries(t2sMap)) {
+            result = result.replace(new RegExp(t, 'g'), s);
+          }
+          return result;
         },
         s2t: (text: string) => {
-          // 简体转繁体 - 需要额外库支持
-          console.warn('[JS] java.s2t() 需要中文转换库支持');
-          return text;
+          // 简体转繁体 - 简单映射表
+          const s2tMap: Record<string, string> = {
+            '书': '書', '说': '說', '话': '話', '开': '開', '门': '門',
+            '电': '電', '脑': '腦', '网': '網', '页': '頁', '机': '機',
+            '时': '時', '间': '間', '东': '東', '车': '車', '长': '長',
+            '学': '學', '习': '習', '国': '國', '语': '語', '见': '見',
+            '观': '觀', '视': '視', '听': '聽', '读': '讀', '写': '寫',
+            '买': '買', '卖': '賣', '钱': '錢', '银': '銀', '飞': '飛',
+            '场': '場', '运': '運', '动': '動', '体': '體', '会': '會',
+            '议': '議', '论': '論',
+          };
+          let result = text;
+          for (const [s, t] of Object.entries(s2tMap)) {
+            result = result.replace(new RegExp(s, 'g'), t);
+          }
+          return result;
+        },
+
+        // ==================== 编码转换 ====================
+        utf8ToGbk: (str: string) => {
+          // UTF-8 转 GBK - Node.js 中需要 iconv-lite 库
+          // 这里返回原字符串，实际使用时需要安装 iconv-lite
+          console.warn('[JS] java.utf8ToGbk() 需要 iconv-lite 库支持');
+          return str;
         },
 
         // ==================== 工具方法 ====================
         randomUUID: () => crypto.randomUUID(),
+        androidId: () => 'node-' + crypto.randomUUID().substring(0, 8),
         
         htmlFormat: (str: string) => {
-          // HTML 格式化
+          // HTML 格式化 - 保留图片
           return str
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<p[^>]*>/gi, '\n')
             .replace(/<\/p>/gi, '')
-            .replace(/<[^>]+>/g, '')
+            .replace(/<(?!img)[^>]+>/g, '')
             .trim();
+        },
+        
+        // 导入脚本
+        importScript: (path: string) => {
+          console.warn('[JS] java.importScript() 在沙箱中受限');
+          return '';
+        },
+        
+        // 缓存文件
+        cacheFile: (urlStr: string, saveTime?: number) => {
+          try {
+            const response = syncHttpRequest(urlStr);
+            return response.body;
+          } catch {
+            return '';
+          }
+        },
+        
+        // 下载文件
+        downloadFile: (url: string) => {
+          console.warn('[JS] java.downloadFile() 在沙箱中受限');
+          return '';
         },
 
         // ==================== 日志输出 ====================
@@ -1409,6 +1598,255 @@ function executeJs(
             console.log('[JS] type: undefined');
           } else {
             console.log('[JS] type:', typeof any, Array.isArray(any) ? 'Array' : '');
+          }
+        },
+        toast: (msg: any) => {
+          console.log('[toast]', msg);
+        },
+        longToast: (msg: any) => {
+          console.log('[longToast]', msg);
+        },
+
+        // ==================== 内容解析 (AnalyzeRule 兼容) ====================
+        // 设置解析内容和 baseUrl，返回 AnalyzeRule 兼容对象
+        setContent: (content: any, baseUrl?: string) => {
+          context.variables['_content'] = content;
+          if (baseUrl) {
+            context.variables['_baseUrl'] = baseUrl;
+          }
+          // 返回兼容对象以支持链式调用
+          const analyzeRule = {
+            setContent: (c: any, b?: string) => {
+              context.variables['_content'] = c;
+              if (b) context.variables['_baseUrl'] = b;
+              return analyzeRule;
+            },
+            getString: (rule: string, isUrl?: boolean) => sandbox.java.getString(rule, null, isUrl),
+            getStringList: (rule: string, isUrl?: boolean) => sandbox.java.getStringList(rule, null, isUrl),
+            getElements: (rule: string) => sandbox.java.getElements(rule),
+          };
+          return analyzeRule;
+        },
+        
+        // 获取文本列表
+        getStringList: (rule: string, mContent?: any, isUrl?: boolean) => {
+          if (!rule) return null;
+          const cheerio = require('cheerio');
+          const content = mContent || context.variables['_content'] || context.src;
+          const baseUrl = context.variables['_baseUrl'] || context.baseUrl;
+          
+          try {
+            // 解析规则
+            const parts = rule.split('@');
+            const selector = parts.slice(0, -1).join('@') || parts[0];
+            const attr = parts.length > 1 ? parts[parts.length - 1] : 'text';
+            
+            let $: any;
+            if (typeof content === 'string') {
+              // 检查是否是 JSON
+              if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
+                try {
+                  const json = JSON.parse(content);
+                  const { JSONPath } = require('jsonpath-plus');
+                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  const results = JSONPath({ path: jsonRule, json, wrap: true });
+                  return Array.isArray(results) ? results : [results];
+                } catch {
+                  // 不是有效 JSON，继续用 HTML 解析
+                }
+              }
+              $ = cheerio.load(content);
+            } else {
+              $ = content;
+            }
+            
+            const results: string[] = [];
+            $(selector).each((_: number, el: any) => {
+              let value: string;
+              if (attr === 'text') {
+                value = $(el).text().trim();
+              } else if (attr === 'html') {
+                value = $(el).html() || '';
+              } else if (attr === 'textNodes') {
+                value = $(el).contents().filter(function(this: any) {
+                  return this.type === 'text';
+                }).text().trim();
+              } else {
+                value = $(el).attr(attr) || '';
+              }
+              
+              // 如果是 URL，转为绝对路径
+              if (isUrl && value && baseUrl) {
+                try {
+                  value = new URL(value, baseUrl).href;
+                } catch {}
+              }
+              
+              if (value) results.push(value);
+            });
+            
+            return results.length > 0 ? results : null;
+          } catch {
+            return null;
+          }
+        },
+        
+        // 获取单个文本
+        getString: (rule: string, mContent?: any, isUrl?: boolean) => {
+          if (!rule) return '';
+          const cheerio = require('cheerio');
+          const content = mContent || context.variables['_content'] || context.src;
+          const baseUrl = context.variables['_baseUrl'] || context.baseUrl;
+          
+          // 解析规则：selector@attr 或 selector@text
+          const parts = rule.split('@');
+          const selector = parts.slice(0, -1).join('@') || parts[0];
+          const attr = parts.length > 1 ? parts[parts.length - 1] : 'text';
+          
+          try {
+            let $: any;
+            if (typeof content === 'string') {
+              // 检查是否是 JSON
+              if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
+                try {
+                  const json = JSON.parse(content);
+                  const { JSONPath } = require('jsonpath-plus');
+                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  const results = JSONPath({ path: jsonRule, json, wrap: false });
+                  return Array.isArray(results) ? results[0]?.toString() || '' : results?.toString() || '';
+                } catch {
+                  // 不是有效 JSON，继续用 HTML 解析
+                }
+              }
+              $ = cheerio.load(content);
+            } else if (Array.isArray(content) && content.length > 0) {
+              $ = cheerio.load('<div></div>');
+              const wrapper = $('div');
+              content.forEach((el: any) => wrapper.append(el));
+            } else {
+              $ = content;
+            }
+            
+            const el = selector ? $(selector).first() : $;
+            
+            let value: string;
+            if (attr === 'text') {
+              value = el.text().trim();
+            } else if (attr === 'html') {
+              value = el.html() || '';
+            } else if (attr === 'all') {
+              value = el.toString();
+            } else if (attr === 'textNodes') {
+              value = el.contents().filter(function(this: any) {
+                return this.type === 'text';
+              }).text().trim();
+            } else {
+              value = el.attr(attr) || '';
+            }
+            
+            // 如果是 URL，转为绝对路径
+            if (isUrl && value && baseUrl) {
+              try {
+                value = new URL(value, baseUrl).href;
+              } catch {}
+            }
+            
+            return value;
+          } catch {
+            return '';
+          }
+        },
+        
+        // 获取元素列表
+        getElements: (rule: string, mContent?: any) => {
+          if (!rule) return [];
+          const cheerio = require('cheerio');
+          const content = mContent || context.variables['_content'] || context.src;
+          
+          try {
+            let $: any;
+            if (typeof content === 'string') {
+              // 检查是否是 JSON
+              if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
+                try {
+                  const json = JSON.parse(content);
+                  const { JSONPath } = require('jsonpath-plus');
+                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  const results = JSONPath({ path: jsonRule, json, wrap: true });
+                  return Array.isArray(results) ? results : [results];
+                } catch {
+                  // 不是有效 JSON，继续用 HTML 解析
+                }
+              }
+              $ = cheerio.load(content);
+            } else {
+              $ = content;
+            }
+            
+            return $(rule).toArray();
+          } catch {
+            return [];
+          }
+        },
+        
+        // 获取单个元素
+        getElement: (rule: string, mContent?: any) => {
+          const elements = sandbox.java.getElements(rule, mContent);
+          return elements.length > 0 ? elements[0] : null;
+        },
+        getWebViewUA: () => {
+          return 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36';
+        },
+        // ==================== WebView ====================
+        webView: (html: string | null, url: string | null, js: string | null) => {
+          console.log('[JS] java.webView() 使用 Puppeteer 执行');
+          try {
+            const { webViewSyncCached } = require('./webview');
+            return webViewSyncCached(html, url, js);
+          } catch (e: any) {
+            console.error('[JS] java.webView() error:', e.message);
+            if (url) {
+              try {
+                return syncHttpRequest(url).body;
+              } catch {
+                return '';
+              }
+            }
+            return '';
+          }
+        },
+        webViewGetSource: (html: string | null, url: string | null, js: string | null, sourceRegex: string) => {
+          console.log('[JS] java.webViewGetSource() 使用 Puppeteer 执行');
+          try {
+            const { webViewSyncCached } = require('./webview');
+            return webViewSyncCached(html, url, js);
+          } catch (e: any) {
+            console.error('[JS] java.webViewGetSource() error:', e.message);
+            return '';
+          }
+        },
+        webViewGetOverrideUrl: (html: string | null, url: string | null, js: string | null, overrideUrlRegex: string) => {
+          console.log('[JS] java.webViewGetOverrideUrl() 使用 Puppeteer 执行');
+          try {
+            const { webViewSyncCached } = require('./webview');
+            return webViewSyncCached(html, url, js);
+          } catch (e: any) {
+            console.error('[JS] java.webViewGetOverrideUrl() error:', e.message);
+            return '';
+          }
+        },
+        startBrowser: (url: string, title: string) => {
+          console.log('[JS] java.startBrowser() - 打开浏览器:', url);
+        },
+        startBrowserAwait: (url: string, title: string, refetch?: boolean) => {
+          console.log('[JS] java.startBrowserAwait() 使用 Puppeteer 执行');
+          try {
+            const { webViewSyncCached } = require('./webview');
+            const body = webViewSyncCached(null, url, null);
+            return { body: () => body };
+          } catch (e: any) {
+            console.error('[JS] java.startBrowserAwait() error:', e.message);
+            return { body: () => '' };
           }
         },
 
@@ -1491,6 +1929,153 @@ function executeJs(
         },
       },
 
+      // ==================== org.jsoup.Jsoup 兼容 ====================
+      org: {
+        jsoup: {
+          Jsoup: {
+            parse: (html: string) => {
+              const $ = cheerio.load(html);
+              return {
+                select: (selector: string) => {
+                  const el = $(selector).first();
+                  return {
+                    attr: (name: string) => el.attr(name) || '',
+                    text: () => el.text(),
+                    html: () => el.html() || '',
+                    first: () => ({
+                      attr: (name: string) => el.attr(name) || '',
+                      text: () => el.text(),
+                      html: () => el.html() || '',
+                    }),
+                  };
+                },
+                body: () => ({
+                  text: () => $('body').text(),
+                  html: () => $('body').html() || '',
+                }),
+              };
+            },
+            connect: (url: string) => ({
+              get: () => {
+                const response = syncHttpRequest(url);
+                const $ = cheerio.load(response.body);
+                return {
+                  select: (selector: string) => {
+                    const el = $(selector).first();
+                    return {
+                      attr: (name: string) => el.attr(name) || '',
+                      text: () => el.text(),
+                    };
+                  },
+                  body: () => ({
+                    text: () => $('body').text(),
+                    html: () => $('body').html() || '',
+                  }),
+                };
+              },
+            }),
+          },
+        },
+      },
+      
+      // ==================== Cookie 和 Cache ====================
+      cookie: {
+        getCookie: (tag: string, key?: string) => '',
+        setCookie: (tag: string, cookie: string) => {},
+        removeCookie: (tag: string) => {},
+      },
+      cache: {
+        get: (key: string) => context.variables[`_cache_${key}`],
+        put: (key: string, value: any) => {
+          context.variables[`_cache_${key}`] = value;
+        },
+        delete: (key: string) => {
+          delete context.variables[`_cache_${key}`];
+        },
+      },
+
+      // ==================== 全局 Get/Put 函数 ====================
+      Get: (key: string) => context.variables[key],
+      Put: (key: string, value: any) => {
+        context.variables[key] = value;
+        return value;
+      },
+
+      // Reload 函数 - 加载远程 JS 脚本（Legado 特有）
+      Reload: (url: string) => {
+        try {
+          // 检查缓存
+          const cacheKey = `_reload_${url}`;
+          if (context.variables[cacheKey]) {
+            return context.variables[cacheKey];
+          }
+          // 从网络加载
+          const response = syncHttpRequest(url);
+          if (response.body) {
+            context.variables[cacheKey] = response.body;
+            return response.body;
+          }
+          return '';
+        } catch (e) {
+          console.error('[JS] Reload error:', e);
+          return '';
+        }
+      },
+
+      // Map 函数 - 获取 loginUi 配置值（Legado 特有）
+      Map: (name: string) => {
+        return context.variables[`_loginUi_${name}`] || '';
+      },
+
+      // surl 函数 - 获取书源 URL（某些书源使用）
+      surl: () => {
+        return context.variables['_sourceUrl'] || context.baseUrl || '';
+      },
+
+      // flfl 对象 - 分类映射（某些书源使用）
+      flfl: context.variables['_flfl'] || {},
+
+      // u_a 变量 - User-Agent
+      u_a: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+
+      // Packages 模拟（Java 包）
+      Packages: {
+        java: {
+          lang: {
+            Thread: {
+              sleep: (ms: number) => {
+                // 同步等待（在 Node.js 中不推荐，但为了兼容）
+                const end = Date.now() + ms;
+                while (Date.now() < end) {}
+              },
+            },
+          },
+        },
+      },
+
+      // source 对象（书源相关方法）
+      source: {
+        get: (key: string) => context.variables[key],
+        put: (key: string, value: any) => {
+          context.variables[key] = value;
+          return value;
+        },
+        getLoginInfoMap: () => context.variables['_loginInfo'] || {},
+        putLoginInfo: (info: string) => {
+          try {
+            context.variables['_loginInfo'] = JSON.parse(info);
+          } catch {}
+        },
+        getKey: () => context.variables['_sourceUrl'] || context.baseUrl || '',
+        setVariable: (data: string) => {
+          try {
+            Object.assign(context.variables, JSON.parse(data));
+          } catch {}
+          return data;
+        },
+        getVariable: (key: string) => context.variables[key],
+      },
+
       // ==================== 全局工具函数 ====================
       JSON: JSON,
       parseInt: parseInt,
@@ -1515,13 +2100,36 @@ function executeJs(
       },
       setTimeout: setTimeout,
       clearTimeout: clearTimeout,
+      
+      // eval 函数支持
+      eval: (code: string) => {
+        try {
+          const innerScript = new vm.Script(code);
+          return innerScript.runInContext(vm.createContext(sandbox), { timeout: 5000 });
+        } catch (e) {
+          console.error('[JS] eval error:', e);
+          return null;
+        }
+      },
     };
 
     // 创建上下文
     const vmContext = vm.createContext(sandbox);
 
-    // 执行代码
-    const script = new vm.Script(code);
+    // 先加载 jsLib（如果有）
+    const jsLib = context.variables['_jsLib'];
+    if (jsLib) {
+      try {
+        const convertedJsLib = convertRhinoToES6(jsLib);
+        const jsLibScript = new vm.Script(convertedJsLib);
+        jsLibScript.runInContext(vmContext, { timeout: 5000 });
+      } catch (e) {
+        console.error('[JS] jsLib execution error:', e);
+      }
+    }
+
+    // 执行代码（使用已转换的代码）
+    const script = new vm.Script(convertedCode);
     return script.runInContext(vmContext, { timeout: 5000 });
   } catch (error) {
     console.error('JS execution error:', error);
@@ -1561,12 +2169,20 @@ function processJsRule(
   // 处理 @js: (必须在规则末尾)
   if (processed.includes('@js:')) {
     const jsIndex = processed.lastIndexOf('@js:');
-    const jsCode = processed.substring(jsIndex + 4);
+    const jsCode = processed.substring(jsIndex + 4).trim();
     const beforeJs = processed.substring(0, jsIndex);
 
-    hasJs = true;
-    jsResult = executeJs(jsCode, context);
-    processed = beforeJs;
+    // 检查是否是正则替换规则 @js:##regex##replacement###
+    // 这种情况下 @js: 后面跟的是正则替换，不是 JS 代码
+    if (jsCode.startsWith('##') || jsCode.startsWith('#')) {
+      // 这是正则替换规则，不是 JS
+      // 保持原样，让后续的正则处理逻辑处理
+      // processed 保持不变
+    } else {
+      hasJs = true;
+      jsResult = executeJs(jsCode, context);
+      processed = beforeJs;
+    }
   }
 
   return { processed, hasJs, jsResult };
@@ -1711,11 +2327,17 @@ export function resolveUrl(url: string, baseUrl: string): string {
 /**
  * 解析规则分隔符
  * 支持 || (或) 和 && (与) 和 %% (格式化)
+ * 注意：不在 JS 代码块内部分割
  */
 export function splitRule(rule: string): {
   rules: string[];
   operator: 'or' | 'and' | 'format';
 } {
+  // 如果包含 JS 代码块，不进行分割
+  if (/<js>[\s\S]*?<\/js>/i.test(rule) || rule.includes('@js:')) {
+    return { rules: [rule], operator: 'or' };
+  }
+  
   if (rule.includes('||')) {
     return { rules: rule.split('||'), operator: 'or' };
   }
@@ -1741,16 +2363,71 @@ function executeSingleRule(
 
   if (!rule) return [];
 
-  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  // 处理换行符分隔的规则链
+  // 例如: "a.0@href\n@js:##regex##replacement###"
+  // 第一条规则获取结果，后续规则对结果进行处理
+  if (rule.includes('\n')) {
+    const lines = rule.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length > 1) {
+      // 执行第一条规则
+      let results = executeSingleRule(content, lines[0], baseUrl, variables);
+      
+      // 对结果应用后续规则
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // 检查是否是正则替换规则 @js:##regex##replacement###
+        if (line.startsWith('@js:##') || line.startsWith('##')) {
+          const regexRule = line.startsWith('@js:') ? line.substring(4) : line;
+          const parts = regexRule.split('##').filter(p => p !== '');
+          if (parts.length >= 1) {
+            const pattern = parts[0];
+            const replacement = parts[1] || '';
+            try {
+              const regex = new RegExp(pattern, 'g');
+              results = results.map(r => String(r).replace(regex, replacement));
+            } catch {
+              // 忽略正则错误
+            }
+          }
+        } else {
+          // 其他规则，对每个结果执行
+          const newResults: any[] = [];
+          for (const r of results) {
+            const subResults = executeSingleRule(r, line, baseUrl, variables);
+            newResults.push(...subResults);
+          }
+          results = newResults;
+        }
+      }
+      
+      return results;
+    }
+  }
 
-  // 1. 处理 @put/@get
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  // 保留原始对象用于 JS 规则中的 result
+  const originalContent = content;
+
+  // 1. 处理 @put/@get（在 JS 代码块外部）
   rule = processPutGet(rule, { variables, body: text, baseUrl });
 
-  // 2. 处理变量替换 {{}} 和 {}
-  rule = processVariables(rule, { variables, body: text, baseUrl });
+  // 2. 检测是否包含 JS 代码块
+  const hasJsBlock = /<js>[\s\S]*?<\/js>/i.test(rule) || rule.includes('@js:');
+  
+  // 3. 如果没有 JS 代码块，处理变量替换 {{}} 和 {}
+  // 如果有 JS 代码块，变量替换会在 JS 执行时通过沙箱变量处理
+  if (!hasJsBlock) {
+    rule = processVariables(rule, { variables, body: text, baseUrl });
+  }
 
-  // 3. 处理 JavaScript
-  const jsContext = { result: null, src: text, baseUrl, variables };
+  // 4. 处理 JavaScript - result 使用原始对象（如果是对象的话）
+  const jsContext = { 
+    result: typeof originalContent === 'object' ? originalContent : text, 
+    src: text, 
+    baseUrl, 
+    variables 
+  };
   const { processed, hasJs, jsResult } = processJsRule(rule, jsContext);
 
   if (hasJs && jsResult !== null) {
@@ -1768,7 +2445,34 @@ function executeSingleRule(
     rule.startsWith('$.') ||
     rule.startsWith('$[')
   ) {
-    return parseJson(content, rule);
+    // 处理 ## 正则替换
+    let jsonRule = rule;
+    let replaceRegex = '';
+    let replacement = '';
+    
+    if (rule.includes('##')) {
+      const parts = rule.split('##');
+      jsonRule = parts[0];
+      replaceRegex = parts[1] || '';
+      replacement = parts[2] || '';
+    }
+    
+    let results = parseJson(content, jsonRule);
+    
+    // 应用正则替换
+    if (replaceRegex && results.length > 0) {
+      try {
+        const regex = new RegExp(replaceRegex, 'g');
+        results = results.map(r => {
+          if (typeof r === 'string') {
+            return r.replace(regex, replacement);
+          }
+          return r;
+        });
+      } catch {}
+    }
+    
+    return results;
   }
 
   // 5. XPath 规则
@@ -1942,11 +2646,16 @@ export function parseList(
 
 /**
  * 从元素中解析规则
+ * @param element - Cheerio 元素或 JSON 对象
+ * @param rule - 解析规则
+ * @param baseUrl - 基础 URL
+ * @param variables - 额外的变量（如当前解析的书籍数据）
  */
 export function parseFromElement(
   element: cheerio.Cheerio<any> | object,
   rule: string,
-  baseUrl: string
+  baseUrl: string,
+  variables?: Record<string, any>
 ): ParseResult {
   if (!rule || !rule.trim()) {
     return { success: false, error: '规则为空' };
@@ -1954,24 +2663,37 @@ export function parseFromElement(
 
   try {
     let content: string;
+    let elementData: any = null;
 
     if (
       typeof element === 'object' &&
       'html' in element &&
       typeof element.html === 'function'
     ) {
-      // Cheerio 元素
-      content = (element as cheerio.Cheerio<any>).html() || '';
+      // Cheerio 元素 - 使用 toString() 获取外部 HTML（包括元素本身）
+      const cheerioEl = element as cheerio.Cheerio<any>;
+      // 获取外部 HTML，包括元素标签本身
+      content = cheerioEl.toString() || cheerioEl.html() || '';
     } else {
       // JSON 对象
       content = JSON.stringify(element);
+      elementData = element;
     }
 
     const ctx: ParseContext = {
       body: content,
       baseUrl,
-      variables: {},
+      variables: {
+        ...variables,
+        // 将元素数据作为 result 变量传递给 JS 规则
+        _elementData: elementData,
+      },
     };
+
+    // 如果规则是纯 JS 且元素是 JSON 对象，将元素数据作为 result
+    if (elementData && (rule.startsWith('<js>') || rule.startsWith('@js:'))) {
+      ctx.variables._jsResult = elementData;
+    }
 
     return parseRule(ctx, rule);
   } catch (error: any) {
