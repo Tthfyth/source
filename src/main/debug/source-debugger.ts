@@ -238,6 +238,32 @@ export class SourceDebugger {
   }
 
   /**
+   * 从 URL 中提取参数并存储到 variables
+   * 支持单独测试目录/正文时，@get:{xxx} 能获取到 URL 中的参数
+   */
+  private extractUrlParams(url: string): void {
+    try {
+      const urlObj = new URL(url);
+      // 提取查询参数
+      urlObj.searchParams.forEach((value, key) => {
+        if (value && !this.variables[key]) {
+          this.variables[key] = value;
+          this.log('info', 'parse', `从 URL 提取参数: ${key}=${value}`);
+        }
+      });
+      
+      // 尝试从路径中提取 ID（常见模式：/book/123/, /comic/456/）
+      const pathMatch = url.match(/\/(\d+)\/?(?:\?|$)/);
+      if (pathMatch && !this.variables['id']) {
+        this.variables['id'] = pathMatch[1];
+        this.log('info', 'parse', `从 URL 路径提取 ID: ${pathMatch[1]}`);
+      }
+    } catch {
+      // URL 解析失败，忽略
+    }
+  }
+
+  /**
    * 构建搜索URL - 使用 AnalyzeUrl 完全兼容 Legado
    */
   private buildSearchUrlAnalyze(keyword: string, page: number = 1): AnalyzeUrl | null {
@@ -910,6 +936,10 @@ export class SourceDebugger {
     this.logs = [];
 
     try {
+      // 尝试从 URL 中提取常见的 ID 参数并存储到 variables
+      // 这样即使没有经过详情页，@get:{xxx} 也能获取到值
+      this.extractUrlParams(tocUrl);
+      
       let requestResult: RequestResult | undefined;
       let body = '';
       
@@ -1006,7 +1036,8 @@ export class SourceDebugger {
           const result = parseFromElement(
             element as cheerio.Cheerio<any>,
             ruleToc.chapterName,
-            this.getBaseUrl()
+            this.getBaseUrl(),
+            this.variables  // 传递变量
           );
           if (result.success && result.data) {
             chapter.name = Array.isArray(result.data)
@@ -1020,7 +1051,8 @@ export class SourceDebugger {
           const result = parseFromElement(
             element as cheerio.Cheerio<any>,
             ruleToc.chapterUrl,
-            this.getBaseUrl()
+            this.getBaseUrl(),
+            this.variables  // 传递变量，支持 @get
           );
           if (result.success && result.data) {
             chapter.url = Array.isArray(result.data)
@@ -1078,6 +1110,9 @@ export class SourceDebugger {
     this.logs = [];
 
     try {
+      // 从 URL 中提取参数（支持单独测试正文时 @get 能获取值）
+      this.extractUrlParams(contentUrl);
+      
       let url = contentUrl;
       if (!url.startsWith('http')) {
         url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
@@ -1200,7 +1235,10 @@ export class SourceDebugger {
         }
         
         // 如果正文仍然太短且未使用 WebView，尝试用 WebView 重新获取
-        if (content.length < 100 && !useWebView) {
+        // 但如果响应是 JSON 格式，不使用 WebView（API 不需要渲染）
+        const isJsonResponse = (requestResult.body || '').trim().startsWith('{') || 
+                               (requestResult.body || '').trim().startsWith('[');
+        if (content.length < 100 && !useWebView && !isJsonResponse) {
           this.log('info', 'parse', '正文太短，尝试使用 WebView 重新获取');
           return this.debugContent(contentUrl, true);
         }
@@ -1213,6 +1251,7 @@ export class SourceDebugger {
       if (isImageSource) {
         // 图片书源：提取图片URL列表
         this.log('info', 'parse', '图片书源模式');
+        this.log('info', 'parse', `正文内容预览: ${content.substring(0, 200)}`);
         imageUrls = extractImageUrls(content, url);
         
         if (imageUrls.length > 0) {

@@ -287,15 +287,16 @@ export function extractImageUrls(content: string, baseUrl: string): string[] {
 
   const images: string[] = [];
 
-  // 正则匹配 img 标签中的 src
-  const imgPattern = /<img[^>]*\s(?:data-src|src)\s*=\s*['"]([^'"]+)['"][^>]*>/gi;
+  // 正则匹配 img 标签中的 src（支持 src 和 data-src）
+  // 修复：使用非贪婪匹配，支持 <img src="..."> 格式
+  const imgPattern = /<img\s+(?:[^>]*?\s)?(?:data-src|src)\s*=\s*["']([^"']+)["']/gi;
   let match;
 
   while ((match = imgPattern.exec(content)) !== null) {
     let imgUrl = match[1];
     if (imgUrl) {
-      // 处理相对URL
-      imgUrl = resolveUrl(baseUrl, imgUrl);
+      // 处理相对URL（参数顺序：url, baseUrl）
+      imgUrl = resolveUrl(imgUrl, baseUrl);
       if (imgUrl && !images.includes(imgUrl)) {
         images.push(imgUrl);
       }
@@ -2296,11 +2297,17 @@ function processPutGet(
   let processed = rule;
 
   // @put:{key:rule, key2:rule2}
+  // 注意：规则中可能包含冒号（如 $..xxx），所以只按第一个冒号分割
   const putRegex = /@put:\{([^}]+)\}/g;
   processed = processed.replace(putRegex, (_, content) => {
     const pairs = content.split(',');
     for (const pair of pairs) {
-      const [key, valueRule] = pair.split(':').map((s: string) => s.trim());
+      const colonIndex = pair.indexOf(':');
+      if (colonIndex === -1) continue;
+      
+      const key = pair.substring(0, colonIndex).trim();
+      const valueRule = pair.substring(colonIndex + 1).trim();
+      
       if (key && valueRule) {
         const ctx: ParseContext = {
           body: context.body,
@@ -2319,7 +2326,8 @@ function processPutGet(
   // @get:{key}
   const getRegex = /@get:\{([^}]+)\}/g;
   processed = processed.replace(getRegex, (_, key) => {
-    return context.variables[key.trim()] || '';
+    const value = context.variables[key.trim()];
+    return value !== undefined ? String(value) : '';
   });
 
   return processed;
@@ -2392,7 +2400,26 @@ function executeSingleRule(
   // 例如: "a.0@href\n@js:##regex##replacement###"
   // 第一条规则获取结果，后续规则对结果进行处理
   if (rule.includes('\n')) {
-    const lines = rule.split('\n').map(l => l.trim()).filter(l => l);
+    let lines = rule.split('\n').map(l => l.trim()).filter(l => l);
+    
+    // 处理 @js: 后面紧跟换行符的情况
+    // 例如: "@js:\ncode" 应该合并为 "@js:code"
+    // 或者: "rule1\n@js:\ncode" 中的 "@js:" 和 "code" 应该合并
+    const mergedLines: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // 如果当前行是 "@js:" 且后面还有行，合并后续所有行作为 JS 代码
+      if (line === '@js:' && i + 1 < lines.length) {
+        // 合并后续所有行作为 JS 代码
+        const jsCode = lines.slice(i + 1).join('\n');
+        mergedLines.push('@js:' + jsCode);
+        break; // JS 代码是最后的处理，不再继续
+      } else {
+        mergedLines.push(line);
+      }
+    }
+    lines = mergedLines;
+    
     if (lines.length > 1) {
       // 执行第一条规则
       let results = executeSingleRule(content, lines[0], baseUrl, variables);
@@ -2414,6 +2441,20 @@ function executeSingleRule(
             } catch {
               // 忽略正则错误
             }
+          }
+        } else if (line.startsWith('@js:') || line.startsWith('<js>')) {
+          // JS 规则：将整个结果数组作为 result 传递
+          // 如果结果是数组，先用换行符连接成字符串
+          const resultStr = Array.isArray(results) ? results.join('\n') : String(results);
+          const jsContext = {
+            result: resultStr,
+            src: typeof content === 'string' ? content : JSON.stringify(content),
+            baseUrl,
+            variables,
+          };
+          const { jsResult } = processJsRule(line, jsContext);
+          if (jsResult !== null) {
+            results = Array.isArray(jsResult) ? jsResult : [jsResult];
           }
         } else {
           // 其他规则，对每个结果执行
@@ -2517,7 +2558,13 @@ function executeSingleRule(
     return parseRegex(text, rule);
   }
 
-  // 7. CSS 选择器（默认）
+  // 7. 纯 URL 或纯字符串（不包含选择器特征）
+  // 如果规则是以 http:// 或 https:// 开头，直接返回
+  if (rule.startsWith('http://') || rule.startsWith('https://')) {
+    return [rule];
+  }
+
+  // 8. CSS 选择器（默认）
   if (typeof content === 'string') {
     return parseCss(content, rule, baseUrl);
   }
