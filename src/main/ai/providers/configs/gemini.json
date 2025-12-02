@@ -1,0 +1,40 @@
+{
+  "id": "gemini",
+  "displayName": "Google Gemini",
+  "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+  "apiKeyTemplate": "AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://aistudio.google.com/app/apikey",
+  "sdkMode": "gemini",
+  "priority": 8,
+  "dailyLimit": 1500,
+  "models": [
+    {
+      "id": "gemini-1.5-flash",
+      "name": "Gemini 1.5 Flash",
+      "tooltip": "Google Gemini 1.5 Flash - 快速响应，免费额度大",
+      "maxInputTokens": 1000000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "gemini-1.5-flash-8b",
+      "name": "Gemini 1.5 Flash 8B",
+      "tooltip": "Google Gemini 1.5 Flash 8B - 更快速的小模型",
+      "maxInputTokens": 1000000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "gemini-1.5-pro",
+      "name": "Gemini 1.5 Pro",
+      "tooltip": "Google Gemini 1.5 Pro - 更强大，适合复杂任务",
+      "maxInputTokens": 2000000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "gemini-2.0-flash",
+      "name": "Gemini 2.0 Flash",
+      "tooltip": "Google Gemini 2.0 Flash - 最新一代模型",
+      "maxInputTokens": 1000000,
+      "maxOutputTokens": 8192
+    }
+  ]
+}

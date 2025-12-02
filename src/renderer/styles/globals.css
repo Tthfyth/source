@@ -1,82 +1,19 @@
-@import "tailwindcss";
+/* 全局样式 - Mantine 版本 */
 
-@theme {
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
-}
-
-:root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 160 84% 39%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 160 84% 39%;
-  --radius: 0.5rem;
-}
-
-.dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 160 84% 39%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 160 84% 39%;
-}
-
+/* 基础样式 */
 * {
-  border-color: hsl(var(--border));
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 
 body {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
@@ -91,12 +28,20 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: var(--mantine-color-gray-4);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
+  background: var(--mantine-color-gray-5);
+}
+
+[data-mantine-color-scheme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--mantine-color-dark-4);
+}
+
+[data-mantine-color-scheme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--mantine-color-dark-3);
 }
 
 /* Allotment 分割线样式 */
@@ -105,12 +50,20 @@ body {
 }
 
 .sash {
-  background: hsl(var(--border)) !important;
+  background: var(--mantine-color-gray-3) !important;
   transition: background 0.15s ease;
 }
 
 .sash:hover {
-  background: hsl(var(--primary)) !important;
+  background: var(--mantine-color-teal-6) !important;
+}
+
+[data-mantine-color-scheme="dark"] .sash {
+  background: var(--mantine-color-dark-4) !important;
+}
+
+[data-mantine-color-scheme="dark"] .sash:hover {
+  background: var(--mantine-color-teal-7) !important;
 }
 
 .sash-vertical {
@@ -128,7 +81,7 @@ body {
 
 /* 禁用选中文本高亮 */
 ::selection {
-  background: hsl(var(--primary) / 0.3);
+  background: var(--mantine-color-teal-light);
 }
 
 /* 动画 */
@@ -140,4 +93,115 @@ body {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+/* 面板布局 */
+.panel-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.panel-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+}
+
+[data-mantine-color-scheme="dark"] .panel-header {
+  border-bottom-color: var(--mantine-color-dark-4);
+}
+
+.panel-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* 工具栏样式 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--mantine-color-gray-3);
+  background: var(--mantine-color-body);
+}
+
+[data-mantine-color-scheme="dark"] .toolbar {
+  border-bottom-color: var(--mantine-color-dark-4);
+}
+
+/* 列表项样式 */
+.list-item {
+  display: flex;
+  align-items: center;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.list-item:hover {
+  background: var(--mantine-color-gray-1);
+}
+
+[data-mantine-color-scheme="dark"] .list-item:hover {
+  background: var(--mantine-color-dark-5);
+}
+
+.list-item.active {
+  background: var(--mantine-color-teal-light);
+}
+
+[data-mantine-color-scheme="dark"] .list-item.active {
+  background: var(--mantine-color-teal-light);
+}
+
+/* 代码块样式 */
+.code-block {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  background: var(--mantine-color-gray-0);
+  border-radius: var(--mantine-radius-sm);
+  padding: var(--mantine-spacing-xs);
+  overflow-x: auto;
+}
+
+[data-mantine-color-scheme="dark"] .code-block {
+  background: var(--mantine-color-dark-6);
+}
+
+/* 日志级别颜色 */
+.log-info {
+  color: var(--mantine-color-blue-6);
+}
+
+.log-success {
+  color: var(--mantine-color-green-6);
+}
+
+.log-warning {
+  color: var(--mantine-color-yellow-6);
+}
+
+.log-error {
+  color: var(--mantine-color-red-6);
+}
+
+/* 分类标签颜色 */
+.category-request {
+  background: var(--mantine-color-blue-6);
+}
+
+.category-parse {
+  background: var(--mantine-color-green-6);
+}
+
+.category-field {
+  background: var(--mantine-color-violet-6);
+}
+
+.category-error {
+  background: var(--mantine-color-red-6);
 }

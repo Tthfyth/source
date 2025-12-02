@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { Box } from '@mantine/core';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
 import { TopToolbar } from './TopToolbar';
@@ -93,7 +94,7 @@ export function MainLayout() {
   }, [toggleLeft, toggleRight, toggleBottom]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background">
+    <Box h="100vh" w="100vw" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* 顶部工具栏 */}
       <TopToolbar
         isLeftCollapsed={isLeftCollapsed}
@@ -107,7 +108,7 @@ export function MainLayout() {
       />
 
       {/* 主内容区 */}
-      <div className="flex-1 overflow-hidden">
+      <Box style={{ flex: 1, overflow: 'hidden' }}>
         <Allotment vertical>
           {/* 上部分：三栏布局 */}
           <Allotment.Pane minSize={200}>
@@ -155,7 +156,7 @@ export function MainLayout() {
             <DebugConsole />
           </Allotment.Pane>
         </Allotment>
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 }

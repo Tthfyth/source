@@ -1,11 +1,24 @@
-import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { Trash2, Download, Copy, Search, X, Filter } from 'lucide-react';
-import { Button } from './ui/button';
-import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import { Input } from './ui/input';
+import { useRef, useEffect, useMemo, useState } from 'react';
+import {
+  Box,
+  Group,
+  Text,
+  TextInput,
+  ActionIcon,
+  Badge,
+  ScrollArea,
+  Paper,
+  Collapse,
+  useMantineColorScheme,
+} from '@mantine/core';
+import {
+  IconTrash,
+  IconDownload,
+  IconCopy,
+  IconSearch,
+  IconX,
+} from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
-import { cn } from '../lib/utils';
 import type { LogCategory, DebugLog } from '../types';
 
 const categoryLabels: Record<LogCategory, string> = {
@@ -16,15 +29,15 @@ const categoryLabels: Record<LogCategory, string> = {
 };
 
 const categoryColors: Record<LogCategory, string> = {
-  request: 'bg-blue-500',
-  parse: 'bg-green-500',
-  field: 'bg-purple-500',
-  error: 'bg-red-500',
+  request: 'blue',
+  parse: 'green',
+  field: 'violet',
+  error: 'red',
 };
 
 export function DebugConsole() {
-  const { debugLogs, logFilters, setLogFilters, clearLogs } =
-    useBookSourceStore();
+  const { debugLogs, logFilters, setLogFilters, clearLogs } = useBookSourceStore();
+  const { colorScheme } = useMantineColorScheme();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -35,7 +48,6 @@ export function DebugConsole() {
   const filteredLogs = useMemo(() => {
     let logs = debugLogs.filter((log) => logFilters.includes(log.category));
     
-    // 搜索过滤
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       logs = logs.filter(
@@ -81,10 +93,7 @@ export function DebugConsole() {
   // 复制日志
   const copyLogs = () => {
     const text = filteredLogs
-      .map(
-        (log) =>
-          `[${formatTime(log.timestamp)}] [${log.category}] ${log.message}`
-      )
+      .map((log) => `[${formatTime(log.timestamp)}] [${log.category}] ${log.message}`)
       .join('\n');
     navigator.clipboard.writeText(text);
   };
@@ -113,189 +122,175 @@ export function DebugConsole() {
   };
 
   // 获取日志级别样式
-  const getLogLevelClass = (level: DebugLog['level']) => {
+  const getLogLevelBg = (level: DebugLog['level']) => {
     switch (level) {
       case 'error':
-        return 'bg-red-500/10';
+        return colorScheme === 'dark' ? 'rgba(250, 82, 82, 0.1)' : 'rgba(250, 82, 82, 0.1)';
       case 'warning':
-        return 'bg-yellow-500/10';
+        return colorScheme === 'dark' ? 'rgba(250, 176, 5, 0.1)' : 'rgba(250, 176, 5, 0.1)';
       case 'success':
-        return 'bg-green-500/5';
+        return colorScheme === 'dark' ? 'rgba(64, 192, 87, 0.05)' : 'rgba(64, 192, 87, 0.05)';
       default:
-        return '';
+        return 'transparent';
     }
   };
 
   return (
-    <div className="flex h-full flex-col border-t bg-card">
+    <Box
+      h="100%"
+      style={(theme) => ({
+        display: 'flex',
+        flexDirection: 'column',
+        borderTop: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+      })}
+    >
       {/* 控制台头部 */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">调试日志</span>
-          <Badge variant="outline" className="text-xs font-mono">
+      <Group
+        px="sm"
+        py="xs"
+        justify="space-between"
+        style={(theme) => ({
+          borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        })}
+      >
+        <Group gap="xs">
+          <Text size="sm" fw={500}>调试日志</Text>
+          <Badge size="sm" variant="outline" style={{ fontFamily: 'monospace' }}>
             {filteredLogs.length}/{debugLogs.length}
           </Badge>
-        </div>
+        </Group>
 
-        <div className="flex items-center gap-2">
+        <Group gap="xs">
           {/* 搜索框 */}
           {showSearch ? (
-            <div className="flex items-center gap-1">
-              <div className="relative">
-                <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="搜索日志..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-7 w-40 pl-7 pr-7 text-xs"
-                  autoFocus
-                />
-                {searchQuery && (
-                  <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setSearchQuery('')}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
+            <Group gap={4}>
+              <TextInput
+                placeholder="搜索日志..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                size="xs"
+                w={160}
+                leftSection={<IconSearch size={14} />}
+                rightSection={
+                  searchQuery && (
+                    <ActionIcon variant="subtle" size="xs" onClick={() => setSearchQuery('')}>
+                      <IconX size={12} />
+                    </ActionIcon>
+                  )
+                }
+                autoFocus
+              />
+              <ActionIcon
+                variant="subtle"
+                size="sm"
                 onClick={() => {
                   setShowSearch(false);
                   setSearchQuery('');
                 }}
               >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+                <IconX size={16} />
+              </ActionIcon>
+            </Group>
           ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setShowSearch(true)}
-              title="搜索日志"
-            >
-              <Search className="h-3.5 w-3.5" />
-            </Button>
+            <ActionIcon variant="subtle" size="sm" onClick={() => setShowSearch(true)}>
+              <IconSearch size={16} />
+            </ActionIcon>
           )}
 
-          <div className="h-4 w-px bg-border" />
+          <Box w={1} h={16} bg={colorScheme === 'dark' ? 'dark.4' : 'gray.3'} />
 
           {/* 过滤器 */}
-          <div className="flex gap-0.5">
+          <Group gap={4}>
             {(Object.keys(categoryLabels) as LogCategory[]).map((category) => (
-              <button
+              <Badge
                 key={category}
-                className={cn(
-                  'rounded px-1.5 py-0.5 text-xs transition-colors',
-                  logFilters.includes(category)
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                )}
+                size="xs"
+                variant={logFilters.includes(category) ? 'filled' : 'light'}
+                color={logFilters.includes(category) ? categoryColors[category] : 'gray'}
+                style={{ cursor: 'pointer' }}
                 onClick={() => toggleFilter(category)}
-                title={categoryLabels[category]}
               >
                 {categoryLabels[category]}
-              </button>
+              </Badge>
             ))}
-          </div>
+          </Group>
 
-          <div className="h-4 w-px bg-border" />
+          <Box w={1} h={16} bg={colorScheme === 'dark' ? 'dark.4' : 'gray.3'} />
 
           {/* 操作按钮 */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={copyLogs}
-            disabled={!filteredLogs.length}
-            title="复制日志"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={exportLogs}
-            disabled={!filteredLogs.length}
-            title="导出日志"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={clearLogs}
-            disabled={!debugLogs.length}
-            title="清空日志"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+          <ActionIcon variant="subtle" size="sm" onClick={copyLogs} disabled={!filteredLogs.length} title="复制日志">
+            <IconCopy size={16} />
+          </ActionIcon>
+          <ActionIcon variant="subtle" size="sm" onClick={exportLogs} disabled={!filteredLogs.length} title="导出日志">
+            <IconDownload size={16} />
+          </ActionIcon>
+          <ActionIcon variant="subtle" size="sm" onClick={clearLogs} disabled={!debugLogs.length} title="清空日志">
+            <IconTrash size={16} />
+          </ActionIcon>
+        </Group>
+      </Group>
 
       {/* 日志内容 */}
-      <ScrollArea className="flex-1" ref={scrollRef}>
-        <div className="p-2 font-mono text-xs">
+      <ScrollArea style={{ flex: 1 }} viewportRef={scrollRef}>
+        <Box p="xs" style={{ fontFamily: 'monospace', fontSize: 12 }}>
           {filteredLogs.length > 0 ? (
-            <div className="space-y-0.5">
+            <Box>
               {filteredLogs.map((log) => (
-                <div
+                <Box
                   key={log.id}
-                  className={cn(
-                    'flex flex-wrap items-start gap-2 rounded px-2 py-1 hover:bg-muted/50',
-                    getLogLevelClass(log.level),
-                    log.details && 'cursor-pointer'
-                  )}
-                  onClick={() =>
-                    log.details &&
-                    setExpandedLogId(
-                      expandedLogId === log.id ? null : log.id
-                    )
-                  }
+                  px="xs"
+                  py={4}
+                  style={{
+                    borderRadius: 4,
+                    backgroundColor: getLogLevelBg(log.level),
+                    cursor: log.details ? 'pointer' : 'default',
+                  }}
+                  onClick={() => log.details && setExpandedLogId(expandedLogId === log.id ? null : log.id)}
                 >
-                  <span className="shrink-0 text-muted-foreground">
-                    {formatTime(log.timestamp)}
-                  </span>
-                  <span
-                    className={cn(
-                      'shrink-0 rounded px-1.5 py-0.5 text-white',
-                      categoryColors[log.category]
+                  <Group gap="xs" wrap="nowrap" align="flex-start">
+                    <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                      {formatTime(log.timestamp)}
+                    </Text>
+                    <Badge
+                      size="xs"
+                      color={categoryColors[log.category]}
+                      variant="filled"
+                      style={{ flexShrink: 0 }}
+                    >
+                      {categoryLabels[log.category]}
+                    </Badge>
+                    <Text size="xs" style={{ flex: 1, wordBreak: 'break-all' }}>
+                      {log.message}
+                    </Text>
+                    {log.details && (
+                      <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                        {expandedLogId === log.id ? '▼' : '▶'}
+                      </Text>
                     )}
-                  >
-                    {categoryLabels[log.category]}
-                  </span>
-                  <span className="flex-1 break-all">{log.message}</span>
-                  {log.details && (
-                    <span className="shrink-0 text-muted-foreground">
-                      {expandedLogId === log.id ? '▼' : '▶'}
-                    </span>
-                  )}
+                  </Group>
 
                   {/* 详情展开 */}
-                  {expandedLogId === log.id && log.details && (
-                    <div className="mt-1 w-full rounded bg-muted p-2">
-                      <pre className="whitespace-pre-wrap break-all text-muted-foreground">
-                        {log.details}
-                      </pre>
-                    </div>
-                  )}
-                </div>
+                  <Collapse in={expandedLogId === log.id && !!log.details}>
+                    <Paper
+                      p="xs"
+                      mt="xs"
+                      bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'}
+                      style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+                    >
+                      <Text size="xs" c="dimmed">{log.details}</Text>
+                    </Paper>
+                  </Collapse>
+                </Box>
               ))}
-            </div>
+            </Box>
           ) : (
-            <div className="flex h-20 items-center justify-center text-muted-foreground">
-              <p>执行测试后将在此显示调试信息</p>
-            </div>
+            <Box py="xl" ta="center">
+              <Text size="sm" c="dimmed">执行测试后将在此显示调试信息</Text>
+            </Box>
           )}
-        </div>
+        </Box>
       </ScrollArea>
-    </div>
+    </Box>
   );
 }

@@ -1,0 +1,46 @@
+{
+  "id": "dashscope",
+  "displayName": "阿里云百炼 (通义千问)",
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "apiKeyTemplate": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://bailian.console.aliyun.com/?apiKey=1",
+  "sdkMode": "openai",
+  "priority": 6,
+  "models": [
+    {
+      "id": "qwen-turbo",
+      "name": "通义千问-Turbo",
+      "tooltip": "通义千问 Turbo - 快速响应，适合简单任务",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "qwen-plus",
+      "name": "通义千问-Plus",
+      "tooltip": "通义千问 Plus - 能力均衡，适合中等复杂任务",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "qwen-max",
+      "name": "通义千问-Max",
+      "tooltip": "通义千问 Max - 最强能力，适合复杂任务",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "qwen-coder-turbo",
+      "name": "通义千问-Coder-Turbo",
+      "tooltip": "通义千问代码专用模型 - 适合代码生成和分析",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "qwen-long",
+      "name": "通义千问-Long",
+      "tooltip": "通义千问长文本模型 - 支持超长上下文",
+      "maxInputTokens": 1000000,
+      "maxOutputTokens": 6000
+    }
+  ]
+}

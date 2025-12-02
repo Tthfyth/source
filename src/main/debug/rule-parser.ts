@@ -461,8 +461,15 @@ function selectWithLegadoSyntax(
   }
 
   // 数组索引格式 [index] 或 [start:end:step]
+  // 注意：需要区分 CSS 属性选择器 [property="xxx"] 和数组索引 [0] 或 [0:10]
   if (selector.startsWith('[') && selector.endsWith(']')) {
     const expr = selector.slice(1, -1);
+    // 如果包含 = 或 ~ 或 ^ 或 $ 或 * 等 CSS 属性选择器特征，则当作 CSS 选择器处理
+    if (/[=~^$*|]/.test(expr) || /^[a-zA-Z]/.test(expr)) {
+      // CSS 属性选择器，使用 cheerio 的 find
+      return $el.find(selector);
+    }
+    // 否则当作数组索引处理
     const children = $el.children();
     const indices = parseIndexExpression(expr, children.length);
     const result = $();
@@ -482,14 +489,31 @@ function selectWithLegadoSyntax(
   }
 
   // class.xxx 或 class.xxx.index 格式
+  // Legado 中 class.section-list fix 表示同时具有 section-list 和 fix 两个类
+  // 空格分隔的多个类名作为 AND 条件
   if (selector.startsWith('class.')) {
-    const parts = selector.substring(6).split('.');
-    const className = parts[0];
-    const found = $el.find(`.${className}`);
+    const afterClass = selector.substring(6);
+    
+    // 查找最后的索引部分（数字或[...]）
+    // 例如: "section-list fix" -> className="section-list fix", indexPart=null
+    // 例如: "section-list.0" -> className="section-list", indexPart="0"
+    // 例如: "section-list fix.0" -> className="section-list fix", indexPart="0"
+    let className = afterClass;
+    let indexPart: string | null = null;
+    
+    // 检查是否以 .数字 或 .[...] 结尾
+    const indexMatch = afterClass.match(/\.(-?\d+|\[.+\])$/);
+    if (indexMatch) {
+      className = afterClass.substring(0, afterClass.length - indexMatch[0].length);
+      indexPart = indexMatch[1];
+    }
+    
+    // 处理空格分隔的多类名：转换为 CSS 选择器 .class1.class2
+    const classSelector = className.split(/\s+/).map(c => `.${c}`).join('');
+    const found = $el.find(classSelector);
 
-    if (parts.length > 1) {
+    if (indexPart) {
       // 有索引
-      const indexPart = parts.slice(1).join('.');
       if (/^-?\d+$/.test(indexPart)) {
         const index = parseInt(indexPart);
         return index < 0 ? found.eq(found.length + index) : found.eq(index);
@@ -504,9 +528,10 @@ function selectWithLegadoSyntax(
       }
     }
 
-    // 如果没找到，检查自身
-    if (found.length === 0 && $el.hasClass && $el.hasClass(className)) {
-      return $el;
+    // 如果没找到，检查自身是否匹配所有类名
+    if (found.length === 0 && $el.hasClass) {
+      const allMatch = className.split(/\s+/).every(c => $el.hasClass(c));
+      if (allMatch) return $el;
     }
     return found;
   }

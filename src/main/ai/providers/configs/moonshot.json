@@ -1,0 +1,41 @@
+{
+  "id": "moonshot",
+  "displayName": "Kimi (月之暗面)",
+  "baseUrl": "https://api.moonshot.cn/v1",
+  "apiKeyTemplate": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://platform.moonshot.cn/console/api-keys",
+  "sdkMode": "openai",
+  "priority": 3,
+  "models": [
+    {
+      "id": "moonshot-v1-128k",
+      "name": "Kimi 128K",
+      "tooltip": "Kimi 128K 上下文 - 适合分析大型网页和长文档",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "moonshot-v1-32k",
+      "name": "Kimi 32K",
+      "tooltip": "Kimi 32K 上下文 - 性价比高",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "moonshot-v1-8k",
+      "name": "Kimi 8K",
+      "tooltip": "Kimi 8K 上下文 - 快速响应",
+      "maxInputTokens": 8000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "kimi-k2-0711-preview",
+      "name": "Kimi-K2 Preview (Anthropic)",
+      "sdkMode": "anthropic",
+      "baseUrl": "https://api.moonshot.cn/anthropic",
+      "tooltip": "Kimi-K2 使用 Anthropic SDK 模式，128K 上下文",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192
+    }
+  ]
+}

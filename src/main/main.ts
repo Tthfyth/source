@@ -9,7 +9,8 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import fs from 'fs';
+import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
@@ -138,6 +139,84 @@ ipcMain.handle(
 );
 
 // ============================================
+// IPC 通信接口 - 文件操作
+// ============================================
+
+/**
+ * 保存书源到文件
+ */
+ipcMain.handle('file:saveSource', async (_event, filePath: string, content: string) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+/**
+ * 选择文件保存路径
+ */
+ipcMain.handle('file:selectSavePath', async (_event, defaultPath?: string) => {
+  try {
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: '保存书源',
+      defaultPath: defaultPath || 'booksource.json',
+      filters: [
+        { name: 'JSON 文件', extensions: ['json'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    });
+    return {
+      success: !result.canceled,
+      filePath: result.filePath,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+/**
+ * 选择并读取文件
+ */
+ipcMain.handle('file:openFile', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '导入书源',
+      filters: [
+        { name: 'JSON 文件', extensions: ['json'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    });
+    
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+    
+    const filePath = result.filePaths[0];
+    const content = fs.readFileSync(filePath, 'utf-8');
+    
+    return {
+      success: true,
+      filePath,
+      content,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+// ============================================
 // IPC 通信接口 - AI 服务
 // ============================================
 
@@ -172,12 +251,39 @@ ipcMain.handle('ai:chatWithKnowledge', async (_event, userMessage: string, pageC
 });
 
 /**
- * 获取 AI 供应商列表
+ * 指定供应商和模型发送请求
+ */
+ipcMain.handle('ai:chatWithProvider', async (_event, messages: ChatMessage[], providerId: string, modelId?: string) => {
+  try {
+    const aiService = getAIService();
+    return await aiService.chatWithProvider(messages, providerId, modelId);
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+/**
+ * 获取 AI 供应商列表（旧接口）
  */
 ipcMain.handle('ai:getProviders', async () => {
   try {
     const aiService = getAIService();
     return { success: true, providers: aiService.getProviders() };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 获取 AI 供应商列表（新接口，包含完整配置）
+ */
+ipcMain.handle('ai:getProvidersV2', async () => {
+  try {
+    const aiService = getAIService();
+    return { success: true, providers: aiService.getProvidersV2() };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
@@ -191,6 +297,31 @@ ipcMain.handle('ai:updateProvider', async (_event, id: string, config: any) => {
     const aiService = getAIService();
     aiService.updateProvider(id, config);
     return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 设置当前活动的供应商和模型
+ */
+ipcMain.handle('ai:setActiveProvider', async (_event, providerId: string, modelId?: string) => {
+  try {
+    const aiService = getAIService();
+    aiService.setActiveProvider(providerId, modelId);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 获取当前活动的供应商和模型
+ */
+ipcMain.handle('ai:getActiveProvider', async () => {
+  try {
+    const aiService = getAIService();
+    return { success: true, ...aiService.getActiveProvider() };
   } catch (error: any) {
     return { success: false, error: error.message };
   }

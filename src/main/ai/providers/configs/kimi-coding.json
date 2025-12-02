@@ -1,0 +1,25 @@
+{
+  "id": "kimi-coding",
+  "displayName": "Kimi For Coding",
+  "baseUrl": "https://api.kimi.com/coding/v1",
+  "apiKeyTemplate": "sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://kimi.moonshot.cn/",
+  "sdkMode": "anthropic",
+  "priority": 4,
+  "models": [
+    {
+      "id": "kimi-for-coding",
+      "name": "Kimi For Coding",
+      "sdkMode": "anthropic",
+      "baseUrl": "https://api.kimi.com/coding",
+      "tooltip": "Kimi For Coding - 月之暗面专业编程模型，代码生成能力强",
+      "maxInputTokens": 262144,
+      "maxOutputTokens": 32768,
+      "customHeader": {
+        "HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
+        "X-Title": "Roo Code",
+        "User-Agent": "RooCode/3.34.0"
+      }
+    }
+  ]
+}

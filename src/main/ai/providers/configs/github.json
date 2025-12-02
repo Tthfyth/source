@@ -1,0 +1,47 @@
+{
+  "id": "github",
+  "displayName": "GitHub Models",
+  "baseUrl": "https://models.inference.ai.azure.com",
+  "apiKeyTemplate": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://github.com/settings/tokens",
+  "sdkMode": "openai",
+  "priority": 1,
+  "dailyLimit": 150,
+  "models": [
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o Mini",
+      "tooltip": "OpenAI GPT-4o Mini - 快速、经济的小模型，适合大多数任务",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 16384
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "tooltip": "OpenAI GPT-4o - 最新旗舰模型，多模态能力强",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 16384
+    },
+    {
+      "id": "o1-mini",
+      "name": "o1-mini",
+      "tooltip": "OpenAI o1-mini - 推理模型，适合复杂逻辑任务",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 65536
+    },
+    {
+      "id": "Meta-Llama-3.1-70B-Instruct",
+      "name": "Llama 3.1 70B",
+      "tooltip": "Meta Llama 3.1 70B - 开源大模型，性能优秀",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "Mistral-large",
+      "name": "Mistral Large",
+      "tooltip": "Mistral Large - 欧洲顶级开源模型",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 4096
+    }
+  ]
+}

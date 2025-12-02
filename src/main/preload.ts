@@ -66,6 +66,32 @@ const debugApiHandler = {
 
 contextBridge.exposeInMainWorld('debugApi', debugApiHandler);
 
+// --------- 文件操作 API ---------
+const fileApiHandler = {
+  /**
+   * 保存书源到文件
+   */
+  saveSourceToFile: (filePath: string, content: string) => {
+    return ipcRenderer.invoke('file:saveSource', filePath, content);
+  },
+
+  /**
+   * 选择文件保存路径
+   */
+  selectSavePath: (defaultPath?: string) => {
+    return ipcRenderer.invoke('file:selectSavePath', defaultPath);
+  },
+
+  /**
+   * 选择并读取文件（返回内容和路径）
+   */
+  openFile: () => {
+    return ipcRenderer.invoke('file:openFile');
+  },
+};
+
+contextBridge.exposeInMainWorld('fileApi', fileApiHandler);
+
 // --------- AI 服务 API ---------
 const aiApiHandler = {
   /**
@@ -83,10 +109,24 @@ const aiApiHandler = {
   },
 
   /**
-   * 获取 AI 供应商列表
+   * 指定供应商和模型发送请求
+   */
+  chatWithProvider: (messages: Array<{ role: string; content: string }>, providerId: string, modelId?: string) => {
+    return ipcRenderer.invoke('ai:chatWithProvider', messages, providerId, modelId);
+  },
+
+  /**
+   * 获取 AI 供应商列表（旧接口）
    */
   getProviders: () => {
     return ipcRenderer.invoke('ai:getProviders');
+  },
+
+  /**
+   * 获取 AI 供应商列表（新接口，包含完整配置）
+   */
+  getProvidersV2: () => {
+    return ipcRenderer.invoke('ai:getProvidersV2');
   },
 
   /**
@@ -94,6 +134,20 @@ const aiApiHandler = {
    */
   updateProvider: (id: string, config: any) => {
     return ipcRenderer.invoke('ai:updateProvider', id, config);
+  },
+
+  /**
+   * 设置当前活动的供应商和模型
+   */
+  setActiveProvider: (providerId: string, modelId?: string) => {
+    return ipcRenderer.invoke('ai:setActiveProvider', providerId, modelId);
+  },
+
+  /**
+   * 获取当前活动的供应商和模型
+   */
+  getActiveProvider: () => {
+    return ipcRenderer.invoke('ai:getActiveProvider');
   },
 
   /**

@@ -1,26 +1,31 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
-  Search,
-  Plus,
-  FolderOpen,
-  Save,
-  MoreVertical,
-  Trash2,
-  Copy,
-  Download,
-  CheckCircle,
-} from 'lucide-react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import {
+  Box,
+  Group,
+  Stack,
+  Text,
+  TextInput,
+  Button,
+  ActionIcon,
+  Badge,
+  ScrollArea,
+  Menu,
   Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from './ui/tooltip';
+  useMantineColorScheme,
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import {
+  IconSearch,
+  IconPlus,
+  IconFolderOpen,
+  IconDeviceFloppy,
+  IconDotsVertical,
+  IconTrash,
+  IconCopy,
+  IconDownload,
+  IconCircleCheck,
+} from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
-import { cn } from '../lib/utils';
 
 export function SourceSidebar() {
   const {
@@ -32,10 +37,8 @@ export function SourceSidebar() {
     deleteSource,
   } = useBookSourceStore();
 
+  const { colorScheme } = useMantineColorScheme();
   const [searchQuery, setSearchQuery] = useState('');
-  const [contextMenuSource, setContextMenuSource] = useState<string | null>(
-    null
-  );
 
   // 过滤后的书源列表
   const filteredSources = useMemo(() => {
@@ -66,9 +69,17 @@ export function SourceSidebar() {
         const text = await file.text();
         const count = importSources(text);
         if (count > 0) {
-          alert(`成功导入 ${count} 个书源`);
+          notifications.show({
+            title: '导入成功',
+            message: `成功导入 ${count} 个书源`,
+            color: 'teal',
+          });
         } else {
-          alert('导入失败，请检查文件格式');
+          notifications.show({
+            title: '导入失败',
+            message: '请检查文件格式',
+            color: 'red',
+          });
         }
       }
     };
@@ -80,9 +91,11 @@ export function SourceSidebar() {
     const source = sources.find((s) => s.bookSourceUrl === url);
     if (source) {
       navigator.clipboard.writeText(JSON.stringify(source, null, 2));
-      alert('已复制到剪贴板');
+      notifications.show({
+        message: '已复制到剪贴板',
+        color: 'teal',
+      });
     }
-    setContextMenuSource(null);
   };
 
   // 导出书源
@@ -99,151 +112,176 @@ export function SourceSidebar() {
       a.click();
       URL.revokeObjectURL(blobUrl);
     }
-    setContextMenuSource(null);
   };
 
   // 删除书源
   const handleDelete = (url: string) => {
     if (confirm('确定要删除这个书源吗？此操作不可恢复。')) {
       deleteSource(url);
+      notifications.show({
+        message: '书源已删除',
+        color: 'teal',
+      });
     }
-    setContextMenuSource(null);
   };
 
   return (
-    <div className="flex h-full flex-col border-r bg-card">
+    <Box
+      h="100%"
+      style={(theme) => ({
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+      })}
+    >
       {/* 标题 */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">书源管理</span>
-        <Badge variant="secondary">{sources.length}</Badge>
-      </div>
+      <Group
+        px="sm"
+        py="xs"
+        justify="space-between"
+        style={(theme) => ({
+          borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        })}
+      >
+        <Text size="sm" fw={600}>书源管理</Text>
+        <Badge size="sm" variant="light">{sources.length}</Badge>
+      </Group>
 
       {/* 搜索框 */}
-      <div className="border-b p-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="过滤书源名称或URL..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8"
-          />
-        </div>
-      </div>
+      <Box
+        p="sm"
+        style={(theme) => ({
+          borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        })}
+      >
+        <TextInput
+          placeholder="过滤书源名称或URL..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.currentTarget.value)}
+          leftSection={<IconSearch size={16} />}
+          size="xs"
+        />
+      </Box>
 
       {/* 书源列表 */}
-      <ScrollArea className="flex-1">
-        <div className="p-2">
+      <ScrollArea style={{ flex: 1 }}>
+        <Box p="xs">
           {filteredSources.length > 0 ? (
-            <div className="space-y-1">
+            <Stack gap={4}>
               {filteredSources.map((source) => (
-                <div
+                <Group
                   key={source.bookSourceUrl}
-                  className={cn(
-                    'group relative flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent',
-                    activeSourceId === source.bookSourceUrl &&
-                      'bg-primary/10 text-primary'
-                  )}
+                  px="sm"
+                  py="xs"
+                  gap="xs"
+                  wrap="nowrap"
+                  style={(theme) => ({
+                    cursor: 'pointer',
+                    borderRadius: theme.radius.sm,
+                    backgroundColor:
+                      activeSourceId === source.bookSourceUrl
+                        ? colorScheme === 'dark'
+                          ? theme.colors.teal[9] + '20'
+                          : theme.colors.teal[0]
+                        : 'transparent',
+                    '&:hover': {
+                      backgroundColor: colorScheme === 'dark' ? theme.colors.dark[5] : theme.colors.gray[0],
+                    },
+                  })}
                   onClick={() => selectSource(source.bookSourceUrl)}
                 >
-                  <span
-                    className={cn(
-                      'h-2 w-2 shrink-0 rounded-full',
-                      source.enabled ? 'bg-green-500' : 'bg-red-500'
-                    )}
+                  <Box
+                    w={8}
+                    h={8}
+                    style={(theme) => ({
+                      flexShrink: 0,
+                      borderRadius: '50%',
+                      backgroundColor: source.enabled ? theme.colors.green[6] : theme.colors.red[6],
+                    })}
                   />
-                  <span className="flex-1 truncate">
-                    {source.bookSourceName || '未命名书源'}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setContextMenuSource(
-                        contextMenuSource === source.bookSourceUrl
-                          ? null
-                          : source.bookSourceUrl
-                      );
-                    }}
+                  <Text
+                    size="sm"
+                    style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    c={activeSourceId === source.bookSourceUrl ? 'teal' : undefined}
                   >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-
-                  {/* 上下文菜单 */}
-                  {contextMenuSource === source.bookSourceUrl && (
-                    <div className="absolute right-0 top-full z-50 mt-1 w-36 rounded-md border bg-popover p-1 shadow-md">
-                      <button
-                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                    {source.bookSourceName || '未命名书源'}
+                  </Text>
+                  <Menu position="bottom-end" withinPortal>
+                    <Menu.Target>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ opacity: 0.5 }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.5')}
+                      >
+                        <IconDotsVertical size={16} />
+                      </ActionIcon>
+                    </Menu.Target>
+                    <Menu.Dropdown>
+                      <Menu.Item
+                        leftSection={<IconCopy size={14} />}
                         onClick={() => handleCopy(source.bookSourceUrl)}
                       >
-                        <Copy className="h-4 w-4" />
                         复制书源
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                      </Menu.Item>
+                      <Menu.Item
+                        leftSection={<IconDownload size={14} />}
                         onClick={() => handleExport(source.bookSourceUrl)}
                       >
-                        <Download className="h-4 w-4" />
                         导出书源
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
-                        onClick={() => setContextMenuSource(null)}
-                      >
-                        <CheckCircle className="h-4 w-4" />
+                      </Menu.Item>
+                      <Menu.Item leftSection={<IconCircleCheck size={14} />}>
                         在线验证
-                      </button>
-                      <div className="my-1 h-px bg-border" />
-                      <button
-                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                      </Menu.Item>
+                      <Menu.Divider />
+                      <Menu.Item
+                        color="red"
+                        leftSection={<IconTrash size={14} />}
                         onClick={() => handleDelete(source.bookSourceUrl)}
                       >
-                        <Trash2 className="h-4 w-4" />
                         删除书源
-                      </button>
-                    </div>
-                  )}
-                </div>
+                      </Menu.Item>
+                    </Menu.Dropdown>
+                  </Menu>
+                </Group>
               ))}
-            </div>
+            </Stack>
           ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center text-muted-foreground">
-              <p className="mb-4">暂无书源</p>
-              <Button size="sm" onClick={handleCreate}>
-                创建书源
-              </Button>
-            </div>
+            <Box py="xl" ta="center">
+              <Text size="sm" c="dimmed" mb="md">暂无书源</Text>
+              <Button size="xs" onClick={handleCreate}>创建书源</Button>
+            </Box>
           )}
-        </div>
+        </Box>
       </ScrollArea>
 
       {/* 底部工具栏 */}
-      <div className="flex items-center justify-between border-t p-3">
-        <div className="flex gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleCreate}>
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>新建书源</TooltipContent>
+      <Group
+        p="sm"
+        justify="space-between"
+        style={(theme) => ({
+          borderTop: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        })}
+      >
+        <Group gap="xs">
+          <Tooltip label="新建书源">
+            <ActionIcon variant="subtle" onClick={handleCreate}>
+              <IconPlus size={18} />
+            </ActionIcon>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleImport}>
-                <FolderOpen className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>导入书源</TooltipContent>
+          <Tooltip label="导入书源">
+            <ActionIcon variant="subtle" onClick={handleImport}>
+              <IconFolderOpen size={18} />
+            </ActionIcon>
           </Tooltip>
-        </div>
-        <Button size="sm">
-          <Save className="mr-2 h-4 w-4" />
+        </Group>
+        <Button size="xs" leftSection={<IconDeviceFloppy size={14} />}>
           全部保存
         </Button>
-      </div>
-    </div>
+      </Group>
+    </Box>
   );
 }

@@ -1,7 +1,20 @@
-import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { Code, Table, GitBranch, Sparkles, HelpCircle } from 'lucide-react';
-import { Button } from './ui/button';
-import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { useCallback, useRef, useState } from 'react';
+import {
+  Box,
+  Group,
+  Text,
+  Button,
+  SegmentedControl,
+  Paper,
+  useMantineColorScheme,
+} from '@mantine/core';
+import {
+  IconCode,
+  IconTable,
+  IconGitBranch,
+  IconSparkles,
+  IconHelp,
+} from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import { SourceFormEditor } from './SourceFormEditor';
 import {
@@ -17,14 +30,12 @@ import {
 
 // 获取字段文档
 function getFieldDocByKey(key: string, parentKey?: string): FieldDoc | null {
-  // 直接匹配基本字段
   if (!parentKey) {
     if (key === 'searchUrl') return searchUrlDoc;
     if (key === 'exploreUrl') return exploreUrlDoc;
     if (basicFields[key]) return basicFields[key];
   }
 
-  // 匹配嵌套字段
   switch (parentKey) {
     case 'ruleSearch':
     case 'ruleExplore':
@@ -40,44 +51,6 @@ function getFieldDocByKey(key: string, parentKey?: string): FieldDoc | null {
   return null;
 }
 
-// 解析当前光标位置的字段路径
-function getFieldAtPosition(code: string, position: number): { key: string; parent?: string } | null {
-  // 找到当前行
-  const beforeCursor = code.substring(0, position);
-  const lines = beforeCursor.split('\n');
-  const currentLine = lines[lines.length - 1];
-
-  // 匹配 "fieldName": 格式
-  const fieldMatch = currentLine.match(/"([^"]+)"\s*:/);
-  if (!fieldMatch) return null;
-
-  const fieldName = fieldMatch[1];
-
-  // 查找父级对象
-  let braceCount = 0;
-  let parentKey: string | undefined;
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    // 计算大括号
-    for (const char of line) {
-      if (char === '}') braceCount++;
-      if (char === '{') braceCount--;
-    }
-
-    // 如果找到了一个未闭合的对象
-    if (braceCount < 0) {
-      const parentMatch = line.match(/"([^"]+)"\s*:\s*\{/);
-      if (parentMatch) {
-        parentKey = parentMatch[1];
-        break;
-      }
-    }
-  }
-
-  return { key: fieldName, parent: parentKey };
-}
-
 export function CodeEditor() {
   const {
     sourceCode,
@@ -89,6 +62,7 @@ export function CodeEditor() {
     setEditorViewMode,
   } = useBookSourceStore();
 
+  const { colorScheme } = useMantineColorScheme();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<{
@@ -98,18 +72,14 @@ export function CodeEditor() {
     doc: FieldDoc | null;
   }>({ visible: false, x: 0, y: 0, doc: null });
 
-  // 修复Electron中的焦点问题：点击容器时确保textarea获得焦点
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
-    // 如果点击的不是textarea本身，手动聚焦
     if (e.target !== textareaRef.current && textareaRef.current) {
-      // 使用setTimeout确保在事件处理完成后聚焦
       setTimeout(() => {
         textareaRef.current?.focus();
       }, 0);
     }
   }, []);
 
-  // 格式化代码
   const formatCode = useCallback(() => {
     try {
       const formatted = JSON.stringify(JSON.parse(sourceCode), null, 2);
@@ -119,7 +89,6 @@ export function CodeEditor() {
     }
   }, [sourceCode, updateSourceCode]);
 
-  // 处理快捷键
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 's') {
       e.preventDefault();
@@ -129,7 +98,6 @@ export function CodeEditor() {
       e.preventDefault();
       formatCode();
     }
-    // Tab 键插入空格
     if (e.key === 'Tab') {
       e.preventDefault();
       const textarea = textareaRef.current;
@@ -138,7 +106,6 @@ export function CodeEditor() {
         const end = textarea.selectionEnd;
         const newValue = sourceCode.substring(0, start) + '  ' + sourceCode.substring(end);
         updateSourceCode(newValue);
-        // 设置光标位置
         setTimeout(() => {
           textarea.selectionStart = textarea.selectionEnd = start + 2;
         }, 0);
@@ -146,27 +113,23 @@ export function CodeEditor() {
     }
   };
 
-  // 处理鼠标悬停
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLTextAreaElement>) => {
       const textarea = textareaRef.current;
       if (!textarea) return;
 
-      // 获取鼠标在 textarea 中的位置
       const rect = textarea.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      // 估算光标位置（简化计算）
-      const lineHeight = 24; // 大约行高
-      const charWidth = 8.4; // 大约字符宽度
+      const lineHeight = 24;
+      const charWidth = 8.4;
       const paddingTop = 16;
       const paddingLeft = 16;
 
       const lineIndex = Math.floor((y - paddingTop + textarea.scrollTop) / lineHeight);
       const charIndex = Math.floor((x - paddingLeft + textarea.scrollLeft) / charWidth);
 
-      // 获取该行内容
       const lines = sourceCode.split('\n');
       if (lineIndex < 0 || lineIndex >= lines.length) {
         setTooltip((prev) => ({ ...prev, visible: false }));
@@ -174,15 +137,12 @@ export function CodeEditor() {
       }
 
       const line = lines[lineIndex];
-
-      // 检查是否在字段名上
       const fieldMatch = line.match(/"([^"]+)"\s*:/);
       if (fieldMatch) {
         const fieldStart = line.indexOf('"' + fieldMatch[1] + '"');
         const fieldEnd = fieldStart + fieldMatch[1].length + 2;
 
         if (charIndex >= fieldStart && charIndex <= fieldEnd) {
-          // 找到父级
           let braceCount = 0;
           let parentKey: string | undefined;
 
@@ -228,63 +188,71 @@ export function CodeEditor() {
 
   if (!activeSourceId) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-background">
-        <p className="mb-4 text-muted-foreground">请选择或创建一个书源</p>
+      <Box h="100%" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <Text c="dimmed" mb="md">请选择或创建一个书源</Text>
         <Button onClick={() => createSource()}>创建书源</Button>
-      </div>
+      </Box>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <Box h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       {/* 标签页头部 */}
-      <div className="flex items-center justify-between border-b bg-card px-3">
-        <Tabs
+      <Group
+        px="sm"
+        py="xs"
+        justify="space-between"
+        style={(theme) => ({
+          borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+          backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+        })}
+      >
+        <SegmentedControl
           value={editorViewMode}
-          onValueChange={(v) =>
-            setEditorViewMode(v as 'text' | 'visual' | 'table')
-          }
-        >
-          <TabsList className="h-10 bg-transparent">
-            <TabsTrigger value="text" className="gap-1.5">
-              <Code className="h-4 w-4" />
-              文本视图
-            </TabsTrigger>
-            <TabsTrigger value="table" className="gap-1.5">
-              <Table className="h-4 w-4" />
-              表格视图
-            </TabsTrigger>
-            <TabsTrigger value="visual" className="gap-1.5">
-              <GitBranch className="h-4 w-4" />
-              可视化
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+          onChange={(v) => setEditorViewMode(v as 'text' | 'visual' | 'table')}
+          size="xs"
+          data={[
+            { label: <Group gap={4}><IconCode size={14} />文本视图</Group>, value: 'text' },
+            { label: <Group gap={4}><IconTable size={14} />表格视图</Group>, value: 'table' },
+            { label: <Group gap={4}><IconGitBranch size={14} />可视化</Group>, value: 'visual' },
+          ]}
+        />
 
-        <Button variant="ghost" size="sm" onClick={formatCode}>
-          <Sparkles className="mr-2 h-4 w-4" />
+        <Button variant="subtle" size="xs" leftSection={<IconSparkles size={14} />} onClick={formatCode}>
           格式化
         </Button>
-      </div>
+      </Group>
 
       {/* 编辑器内容区 */}
-      <div 
+      <Box
         ref={containerRef}
-        className="relative flex-1 overflow-hidden"
+        style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
         onClick={editorViewMode === 'text' ? handleContainerClick : undefined}
       >
         {editorViewMode === 'text' && (
-          <div className="absolute inset-0 overflow-auto">
+          <Box style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
             <textarea
               ref={textareaRef}
-              className="block min-h-full w-full resize-none border-0 bg-background p-4 font-mono text-sm leading-6 outline-none focus:outline-none focus:ring-0"
+              style={{
+                display: 'block',
+                minHeight: '100%',
+                width: '100%',
+                resize: 'none',
+                border: 'none',
+                backgroundColor: colorScheme === 'dark' ? 'var(--mantine-color-dark-7)' : 'var(--mantine-color-white)',
+                color: colorScheme === 'dark' ? 'var(--mantine-color-gray-1)' : 'var(--mantine-color-dark-9)',
+                padding: 16,
+                fontFamily: 'var(--mantine-font-family-monospace)',
+                fontSize: 13,
+                lineHeight: 1.8,
+                outline: 'none',
+              }}
               value={sourceCode}
               onChange={(e) => updateSourceCode(e.target.value)}
               onKeyDown={handleKeyDown}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
               onFocus={() => {
-                // 确保textarea在获得焦点时可以正常输入
                 if (textareaRef.current) {
                   textareaRef.current.style.pointerEvents = 'auto';
                 }
@@ -292,49 +260,59 @@ export function CodeEditor() {
               spellCheck={false}
               placeholder="在此编辑书源 JSON..."
             />
-          </div>
+          </Box>
         )}
 
         {editorViewMode === 'table' && <SourceFormEditor />}
 
         {editorViewMode === 'visual' && (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            <p>可视化视图开发中...</p>
-          </div>
+          <Box h="100%" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Text c="dimmed">可视化视图开发中...</Text>
+          </Box>
         )}
 
         {/* 悬停提示框 */}
         {tooltip.visible && tooltip.doc && (
-          <div
-            className="pointer-events-none fixed z-50 max-w-md rounded-lg border bg-popover p-3 shadow-lg"
+          <Paper
+            shadow="md"
+            p="sm"
+            withBorder
             style={{
+              position: 'fixed',
               left: tooltip.x + 10,
               top: tooltip.y - 80,
+              maxWidth: 400,
+              zIndex: 1000,
+              pointerEvents: 'none',
             }}
           >
-            <div className="mb-1 flex items-center gap-2">
-              <HelpCircle className="h-4 w-4 text-primary" />
-              <span className="font-semibold text-foreground">
-                {tooltip.doc.name}
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {tooltip.doc.description}
-            </p>
+            <Group gap="xs" mb={4}>
+              <IconHelp size={16} color="var(--mantine-color-teal-6)" />
+              <Text size="sm" fw={600}>{tooltip.doc.name}</Text>
+            </Group>
+            <Text size="xs" c="dimmed">{tooltip.doc.description}</Text>
             {tooltip.doc.example && (
-              <div className="mt-2">
-                <span className="text-xs text-muted-foreground">示例: </span>
-                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              <Box mt="xs">
+                <Text size="xs" c="dimmed" component="span">示例: </Text>
+                <Text
+                  size="xs"
+                  component="code"
+                  style={{
+                    backgroundColor: 'var(--mantine-color-gray-1)',
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                  }}
+                >
                   {tooltip.doc.example}
-                </code>
-              </div>
+                </Text>
+              </Box>
             )}
             {tooltip.doc.tips && (
-              <p className="mt-1 text-xs text-primary">{tooltip.doc.tips}</p>
+              <Text size="xs" c="teal" mt={4}>{tooltip.doc.tips}</Text>
             )}
-          </div>
+          </Paper>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   );
 }

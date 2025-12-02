@@ -1041,10 +1041,22 @@ export class SourceDebugger {
 
         if (chapter.name || chapter.url) {
           chapters.push(chapter);
+          
+          // 输出前5个和最后1个章节的详细信息
+          if (i < 5) {
+            this.log('info', 'parse', `[${i + 1}] 章节: ${chapter.name || '(无名称)'} | 链接: ${chapter.url || '(无链接)'}`);
+          } else if (i === 5 && chapterList.length > 6) {
+            this.log('info', 'parse', `... 省略中间 ${chapterList.length - 6} 个章节 ...`);
+          } else if (i === chapterList.length - 1 && chapterList.length > 5) {
+            this.log('info', 'parse', `[${i + 1}] 章节: ${chapter.name || '(无名称)'} | 链接: ${chapter.url || '(无链接)'}`);
+          }
         }
       }
 
-      this.log('success', 'parse', `成功解析 ${chapters.length} 个章节`);
+      // 统计信息
+      const withUrl = chapters.filter(ch => ch.url).length;
+      const withName = chapters.filter(ch => ch.name).length;
+      this.log('success', 'parse', `成功解析 ${chapters.length} 个章节 (有名称: ${withName}, 有链接: ${withUrl})`);
 
       return {
         success: true,

@@ -1,18 +1,24 @@
 import { useEffect } from 'react';
-import { TooltipProvider } from './components/ui/tooltip';
-import { Toaster } from './components/ui/toast';
+import { MantineProvider, ColorSchemeScript } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { MainLayout } from './components/MainLayout';
 import { useBookSourceStore } from './stores/bookSourceStore';
+import { theme } from './theme';
+
+// Mantine 样式
+import '@mantine/core/styles.css';
+import '@mantine/notifications/styles.css';
+import '@mantine/code-highlight/styles.css';
+
+// 自定义样式
 import './styles/globals.css';
 
 export default function App() {
-  const { themeMode } = useBookSourceStore();
+  const { themeMode, setThemeMode } = useBookSourceStore();
 
   // 修复 Electron 中的焦点问题
   useEffect(() => {
-    // 当窗口获得焦点时，确保可以正常输入
     const handleWindowFocus = () => {
-      // 延迟一下确保焦点状态稳定
       setTimeout(() => {
         const activeElement = document.activeElement;
         if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'SELECT')) {
@@ -22,11 +28,9 @@ export default function App() {
       }, 50);
     };
 
-    // 监听点击事件，确保输入元素可以获得焦点
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
-        // 强制聚焦
         setTimeout(() => {
           target.focus();
         }, 0);
@@ -42,47 +46,32 @@ export default function App() {
     };
   }, []);
 
-  // 初始化主题
+  // 获取 Mantine 颜色方案
+  const colorScheme = themeMode === 'system' 
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : themeMode;
+
+  // 监听系统主题变化
   useEffect(() => {
-    // 检测系统主题偏好
-    const prefersDark = window.matchMedia(
-      '(prefers-color-scheme: dark)'
-    ).matches;
-
-    // 默认使用浅色模式
-    if (themeMode === 'light') {
-      document.documentElement.classList.remove('dark');
-    } else if (themeMode === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      // system
-      if (prefersDark) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    }
-
-    // 监听系统主题变化
+    if (themeMode !== 'system') return;
+    
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (themeMode === 'system') {
-        if (e.matches) {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-      }
+    const handleChange = () => {
+      // 强制重新渲染
+      setThemeMode('system');
     };
 
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [themeMode]);
+  }, [themeMode, setThemeMode]);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <MainLayout />
-      <Toaster />
-    </TooltipProvider>
+    <>
+      <ColorSchemeScript defaultColorScheme={colorScheme} />
+      <MantineProvider theme={theme} defaultColorScheme={colorScheme}>
+        <Notifications position="top-right" />
+        <MainLayout />
+      </MantineProvider>
+    </>
   );
 }

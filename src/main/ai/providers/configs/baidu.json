@@ -1,0 +1,46 @@
+{
+  "id": "baidu",
+  "displayName": "百度千帆 (文心一言)",
+  "baseUrl": "https://qianfan.baidubce.com/v2",
+  "apiKeyTemplate": "bce-v3/ALTAK-xxxxxxxxxxxxxxxxxxxxx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://console.bce.baidu.com/iam/#/iam/accesslist",
+  "sdkMode": "openai",
+  "priority": 7,
+  "models": [
+    {
+      "id": "ernie-4.0-turbo-128k",
+      "name": "文心 4.0 Turbo (128K)",
+      "tooltip": "文心一言 4.0 Turbo - 128K 上下文，适合长文档分析",
+      "maxInputTokens": 123000,
+      "maxOutputTokens": 12288
+    },
+    {
+      "id": "ernie-4.0-turbo-8k",
+      "name": "文心 4.0 Turbo (8K)",
+      "tooltip": "文心一言 4.0 Turbo - 快速响应版本",
+      "maxInputTokens": 8000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "ernie-speed-128k",
+      "name": "文心 Speed (128K)",
+      "tooltip": "文心一言 Speed - 高速版本，128K 上下文",
+      "maxInputTokens": 123000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "ernie-lite-8k",
+      "name": "文心 Lite (免费)",
+      "tooltip": "文心一言 Lite - 免费版本，适合简单任务",
+      "maxInputTokens": 8000,
+      "maxOutputTokens": 2048
+    },
+    {
+      "id": "ernie-tiny-8k",
+      "name": "文心 Tiny (免费)",
+      "tooltip": "文心一言 Tiny - 轻量免费版本",
+      "maxInputTokens": 8000,
+      "maxOutputTokens": 2048
+    }
+  ]
+}

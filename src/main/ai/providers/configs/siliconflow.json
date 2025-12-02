@@ -1,0 +1,47 @@
+{
+  "id": "siliconflow",
+  "displayName": "硅基流动",
+  "baseUrl": "https://api.siliconflow.cn/v1",
+  "apiKeyTemplate": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://cloud.siliconflow.cn/account/ak",
+  "sdkMode": "openai",
+  "priority": 9,
+  "dailyLimit": 2000,
+  "models": [
+    {
+      "id": "Qwen/Qwen2.5-7B-Instruct",
+      "name": "通义千问 2.5 7B (免费)",
+      "tooltip": "通义千问 2.5 7B - 免费开源模型",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "name": "通义千问代码 7B (免费)",
+      "tooltip": "通义千问代码 7B - 免费代码专用模型",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "THUDM/glm-4-9b-chat",
+      "name": "智谱 GLM-4 9B (免费)",
+      "tooltip": "智谱 GLM-4 9B - 免费开源模型",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V2.5",
+      "name": "DeepSeek V2.5 (免费)",
+      "tooltip": "DeepSeek V2.5 - 免费开源模型",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096
+    },
+    {
+      "id": "Pro/deepseek-ai/DeepSeek-V3",
+      "name": "DeepSeek V3 Pro",
+      "tooltip": "DeepSeek V3 Pro - 付费高性能版本",
+      "maxInputTokens": 64000,
+      "maxOutputTokens": 8192
+    }
+  ]
+}

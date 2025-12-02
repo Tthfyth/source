@@ -1,46 +1,58 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
-  Play,
-  Square,
-  Plus,
-  Minus,
-  Clock,
-  CheckCircle,
-  XCircle,
-  ChevronRight,
-  ChevronDown,
-  Book,
-  List,
-  FileText,
+  Box,
+  Group,
+  Stack,
+  Text,
+  TextInput,
+  Button,
+  ActionIcon,
+  Badge,
+  Tabs,
+  ScrollArea,
+  Paper,
+  Collapse,
+  Switch,
+  Divider,
   Image,
-  Sparkles,
-  History,
-  Globe,
-  RefreshCw,
-  Copy,
-  ExternalLink,
-  Compass,
-  Zap,
-  Info,
-  AlertCircle,
-} from 'lucide-react';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
-import { Separator } from './ui/separator';
-import { Switch } from './ui/switch';
+  Loader,
+  SegmentedControl,
+  Tooltip,
+  useMantineColorScheme,
+} from '@mantine/core';
+import {
+  IconPlayerPlay,
+  IconPlayerStop,
+  IconPlus,
+  IconMinus,
+  IconClock,
+  IconCircleCheck,
+  IconCircleX,
+  IconChevronRight,
+  IconChevronDown,
+  IconBook,
+  IconList,
+  IconFileText,
+  IconPhoto,
+  IconSparkles,
+  IconHistory,
+  IconWorld,
+  IconRefresh,
+  IconCopy,
+  IconCompass,
+  IconBolt,
+  IconInfoCircle,
+  IconAlertCircle,
+} from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
-import { cn } from '../lib/utils';
 import type { BookItem, ChapterItem, TestMode } from '../types';
 
-const testModeOptions: { label: string; value: TestMode; icon: React.ReactNode }[] = [
-  { label: '搜索', value: 'search', icon: <Globe className="h-3.5 w-3.5" /> },
-  { label: '发现', value: 'explore', icon: <Compass className="h-3.5 w-3.5" /> },
-  { label: '详情', value: 'detail', icon: <Book className="h-3.5 w-3.5" /> },
-  { label: '目录', value: 'toc', icon: <List className="h-3.5 w-3.5" /> },
-  { label: '正文', value: 'content', icon: <FileText className="h-3.5 w-3.5" /> },
+const testModeOptions: { label: string; value: TestMode }[] = [
+  { label: '搜索', value: 'search' },
+  { label: '发现', value: 'explore' },
+  { label: '详情', value: 'detail' },
+  { label: '目录', value: 'toc' },
+  { label: '正文', value: 'content' },
 ];
 
 export function DebugPanel() {
@@ -62,14 +74,15 @@ export function DebugPanel() {
     setAiAnalysisEnabled,
   } = useBookSourceStore();
 
+  const { colorScheme } = useMantineColorScheme();
   const [showConfig, setShowConfig] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showRequestInfo, setShowRequestInfo] = useState(false);
-  const [activeResultTab, setActiveResultTab] = useState('visual');
+  const [activeResultTab, setActiveResultTab] = useState<string | null>('visual');
 
   // 可视化数据
   const visualData = useMemo(() => {
-    if (!testResult?.rawParsedItems) return { books: [], chapters: [], content: '', bookDetail: null };
+    if (!testResult?.rawParsedItems) return { books: [], chapters: [], content: '', bookDetail: null, imageUrls: [] };
 
     const items = testResult.rawParsedItems;
 
@@ -86,11 +99,10 @@ export function DebugPanel() {
             wordCount: item.wordCount || '',
           })).filter((book: BookItem) => book.name)
         : [];
-      return { books, chapters: [], content: '', bookDetail: null };
+      return { books, chapters: [], content: '', bookDetail: null, imageUrls: [] };
     }
 
     if (testMode === 'detail') {
-      // 详情模式：显示单本书的详细信息
       const item = Array.isArray(items) ? items[0] : items;
       if (item) {
         const bookDetail = {
@@ -104,30 +116,28 @@ export function DebugPanel() {
           wordCount: item.wordCount || '',
           updateTime: item.updateTime || '',
         };
-        return { books: [], chapters: [], content: '', bookDetail };
+        return { books: [], chapters: [], content: '', bookDetail, imageUrls: [] };
       }
-      return { books: [], chapters: [], content: '', bookDetail: null };
+      return { books: [], chapters: [], content: '', bookDetail: null, imageUrls: [] };
     }
 
     if (testMode === 'toc') {
       const chapters: ChapterItem[] = Array.isArray(items)
-        ? items.map((item: any) => ({
-            name: item.chapterName || item.name || item.title || '',
-            url: item.chapterUrl || item.url || '',
-          })).filter((ch: ChapterItem) => ch.name && ch.url)
+        ? items.map((item: any, index: number) => ({
+            name: item.chapterName || item.name || item.title || `第${index + 1}章`,
+            url: item.chapterUrl || item.url || item.href || '',
+          })).filter((ch: ChapterItem) => ch.name)  // 只要有名称就显示，url 可以为空
         : [];
-      return { books: [], chapters, content: '', bookDetail: null };
+      return { books: [], chapters, content: '', bookDetail: null, imageUrls: [] };
     }
 
     if (testMode === 'content') {
       let content = '';
       let imageUrls: string[] = [];
       
-      // 检查是否有图片URL列表（图片书源）
       if (testResult.imageUrls && Array.isArray(testResult.imageUrls)) {
         imageUrls = testResult.imageUrls;
       } else if (Array.isArray(items)) {
-        // 检查数组内容是否都是图片URL
         const allImages = items.every((item: any) => 
           typeof item === 'string' && 
           /\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i.test(item)
@@ -149,566 +159,493 @@ export function DebugPanel() {
     return { books: [], chapters: [], content: '', imageUrls: [], bookDetail: null };
   }, [testResult, testMode]);
 
-  // 执行测试
   const handleTest = async () => {
     if (!testInput.trim()) {
-      alert('请输入测试关键词或URL');
       return;
     }
     await runTest();
   };
 
-  // 响应时间格式化
-  const responseTimeText = testResult?.responseTime
-    ? `${testResult.responseTime}ms`
-    : '';
+  const responseTimeText = testResult?.responseTime ? `${testResult.responseTime}ms` : '';
 
   return (
-    <div className="flex h-full flex-col border-l bg-card">
+    <Box
+      h="100%"
+      style={(theme) => ({
+        display: 'flex',
+        flexDirection: 'column',
+        borderLeft: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+      })}
+    >
       {/* 面板标题 */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">规则测试器</span>
-        <div className="flex items-center gap-2" title={aiAnalysisEnabled ? "开启后，AI对话将附加测试结果数据" : "关闭状态"}>
-          <Sparkles className={cn("h-3.5 w-3.5", aiAnalysisEnabled ? "text-primary" : "text-muted-foreground")} />
-          <span className="text-xs text-muted-foreground">AI</span>
-          <Switch
-            checked={aiAnalysisEnabled}
-            onCheckedChange={setAiAnalysisEnabled}
-          />
-        </div>
-      </div>
+      <Group
+        px="sm"
+        py="xs"
+        justify="space-between"
+        style={(theme) => ({
+          borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+        })}
+      >
+        <Text size="sm" fw={600}>规则测试器</Text>
+        <Group gap="xs">
+          <Tooltip label={aiAnalysisEnabled ? "开启后，AI对话将附加测试结果数据" : "关闭状态"}>
+            <Group gap={4}>
+              <IconSparkles size={14} color={aiAnalysisEnabled ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-dimmed)'} />
+              <Text size="xs" c="dimmed">AI</Text>
+              <Switch
+                size="xs"
+                checked={aiAnalysisEnabled}
+                onChange={(e) => setAiAnalysisEnabled(e.currentTarget.checked)}
+              />
+            </Group>
+          </Tooltip>
+        </Group>
+      </Group>
 
       {/* AI 分析状态提示 */}
       {aiAnalysisEnabled && testResult?.rawResponse && (
-        <div className="flex items-center gap-2 border-b bg-primary/5 px-4 py-2">
-          <Sparkles className="h-3.5 w-3.5 text-primary" />
-          <span className="text-xs text-muted-foreground">
-            已缓存 {(testResult.rawResponse.length / 1024).toFixed(1)}KB 响应数据，将附加到下次 AI 对话
-          </span>
-        </div>
+        <Group
+          gap="xs"
+          px="sm"
+          py={6}
+          style={(theme) => ({
+            borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
+            backgroundColor: 'var(--mantine-color-teal-light)',
+          })}
+        >
+          <IconSparkles size={14} color="var(--mantine-color-teal-6)" />
+          <Text size="xs" c="dimmed">
+            已缓存 {(testResult.rawResponse.length / 1024).toFixed(1)}KB 响应数据
+          </Text>
+        </Group>
       )}
 
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 p-4">
-          {/* 测试模式选择 - 更紧凑的设计 */}
-          <div className="flex gap-0.5 rounded-lg bg-muted p-0.5">
-            {testModeOptions.map((option) => (
-              <button
-                key={option.value}
-                className={cn(
-                  'flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all',
-                  testMode === option.value
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
-                )}
-                onClick={() => setTestMode(option.value)}
-                title={option.label}
-              >
-                {option.icon}
-                <span className="hidden sm:inline">{option.label}</span>
-              </button>
-            ))}
-          </div>
+      <ScrollArea style={{ flex: 1 }}>
+        <Stack gap="md" p="sm">
+          {/* 测试模式选择 */}
+          <SegmentedControl
+            value={testMode}
+            onChange={(value) => setTestMode(value as TestMode)}
+            data={testModeOptions}
+            size="xs"
+            fullWidth
+          />
 
-          {/* URL/关键词输入 - 增强版 */}
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  placeholder={testMode === 'search' ? '输入搜索关键词...' : testMode === 'explore' ? '选择发现分类...' : '输入URL...'}
-                  value={testInput}
-                  onChange={(e) => setTestInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleTest()}
-                  className="pr-8"
-                />
-                {testHistory.length > 0 && (
-                  <button
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowHistory(!showHistory)}
-                    title="历史记录"
-                  >
-                    <History className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <Button 
-                onClick={handleTest} 
-                disabled={isLoading}
-                className="min-w-[80px]"
+          {/* URL/关键词输入 */}
+          <Stack gap="xs">
+            <Group gap="xs">
+              <TextInput
+                placeholder={testMode === 'search' ? '输入搜索关键词...' : testMode === 'explore' ? '选择发现分类...' : '输入URL...'}
+                value={testInput}
+                onChange={(e) => setTestInput(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleTest()}
+                style={{ flex: 1 }}
+                rightSection={
+                  testHistory.length > 0 && (
+                    <ActionIcon variant="subtle" size="sm" onClick={() => setShowHistory(!showHistory)}>
+                      <IconHistory size={16} />
+                    </ActionIcon>
+                  )
+                }
+              />
+              <Button
+                onClick={handleTest}
+                loading={isLoading}
+                leftSection={isLoading ? <IconPlayerStop size={16} /> : <IconPlayerPlay size={16} />}
               >
-                {isLoading ? (
-                  <>
-                    <RefreshCw className="mr-1 h-4 w-4 animate-spin" />
-                    停止
-                  </>
-                ) : (
-                  <>
-                    <Play className="mr-1 h-4 w-4" />
-                    测试
-                  </>
-                )}
+                {isLoading ? '停止' : '测试'}
               </Button>
-            </div>
-            
-            {/* 历史记录下拉 */}
-            {showHistory && testHistory.length > 0 && (
-              <div className="rounded-lg border bg-popover p-1 shadow-md">
-                <div className="mb-1 px-2 py-1 text-xs font-medium text-muted-foreground">历史记录</div>
-                <div className="max-h-32 overflow-y-auto">
-                  {testHistory.slice(0, 10).map((item, index) => (
-                    <button
-                      key={index}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
-                      onClick={() => {
-                        setTestInput(item);
-                        setShowHistory(false);
-                      }}
-                    >
-                      <History className="h-3 w-3 text-muted-foreground" />
-                      <span className="flex-1 truncate">{item}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            </Group>
 
-          {/* 高级配置 - 折叠面板 */}
-          <div className="space-y-2">
-            <button
-              className="flex w-full items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            {/* 历史记录下拉 */}
+            <Collapse in={showHistory && testHistory.length > 0}>
+              <Paper withBorder p="xs">
+                <Text size="xs" c="dimmed" mb="xs">历史记录</Text>
+                <ScrollArea.Autosize mah={120}>
+                  <Stack gap={4}>
+                    {testHistory.slice(0, 10).map((item, index) => (
+                      <Button
+                        key={index}
+                        variant="subtle"
+                        size="xs"
+                        justify="flex-start"
+                        leftSection={<IconHistory size={14} />}
+                        onClick={() => {
+                          setTestInput(item);
+                          setShowHistory(false);
+                        }}
+                        styles={{ label: { overflow: 'hidden', textOverflow: 'ellipsis' } }}
+                      >
+                        {item}
+                      </Button>
+                    ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              </Paper>
+            </Collapse>
+          </Stack>
+
+          {/* 高级配置 */}
+          <Box>
+            <Button
+              variant="subtle"
+              size="xs"
+              fullWidth
+              justify="space-between"
+              rightSection={showConfig ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+              leftSection={<IconBolt size={16} />}
               onClick={() => setShowConfig(!showConfig)}
             >
-              <span className="flex items-center gap-2">
-                <Zap className="h-3.5 w-3.5" />
-                请求配置
-              </span>
-              <ChevronDown
-                className={cn(
-                  'h-4 w-4 transition-transform duration-200',
-                  showConfig && 'rotate-180'
-                )}
-              />
-            </button>
+              请求配置
+            </Button>
 
-            {showConfig && (
-              <div className="space-y-3 rounded-lg border bg-card p-3 animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">自定义 Headers</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={addRequestHeader}
-                    className="h-7"
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
+            <Collapse in={showConfig}>
+              <Paper withBorder p="sm" mt="xs">
+                <Group justify="space-between" mb="xs">
+                  <Text size="xs" fw={500}>自定义 Headers</Text>
+                  <Button variant="light" size="xs" leftSection={<IconPlus size={14} />} onClick={addRequestHeader}>
                     添加
                   </Button>
-                </div>
+                </Group>
                 {requestHeaders.length === 0 ? (
-                  <div className="py-4 text-center text-xs text-muted-foreground">
-                    暂无自定义请求头
-                  </div>
+                  <Text size="xs" c="dimmed" ta="center" py="md">暂无自定义请求头</Text>
                 ) : (
-                  <div className="space-y-2">
+                  <Stack gap="xs">
                     {requestHeaders.map((header, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
+                      <Group key={index} gap="xs">
+                        <TextInput
                           placeholder="Header 名称"
                           value={header.key}
-                          onChange={(e) =>
-                            updateRequestHeader(index, 'key', e.target.value)
-                          }
-                          className="flex-1 h-8 text-xs"
+                          onChange={(e) => updateRequestHeader(index, 'key', e.currentTarget.value)}
+                          size="xs"
+                          style={{ flex: 1 }}
                         />
-                        <Input
+                        <TextInput
                           placeholder="Header 值"
                           value={header.value}
-                          onChange={(e) =>
-                            updateRequestHeader(index, 'value', e.target.value)
-                          }
-                          className="flex-1 h-8 text-xs"
+                          onChange={(e) => updateRequestHeader(index, 'value', e.currentTarget.value)}
+                          size="xs"
+                          style={{ flex: 1 }}
                         />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => removeRequestHeader(index)}
-                        >
-                          <Minus className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                        <ActionIcon variant="subtle" color="red" size="sm" onClick={() => removeRequestHeader(index)}>
+                          <IconMinus size={14} />
+                        </ActionIcon>
+                      </Group>
                     ))}
-                  </div>
+                  </Stack>
                 )}
-              </div>
-            )}
-          </div>
+              </Paper>
+            </Collapse>
+          </Box>
 
-          <Separator />
+          <Divider />
 
-          {/* 响应结果 - 增强版 */}
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-sm font-medium">响应结果</span>
+          {/* 响应结果 */}
+          <Box>
+            <Group justify="space-between" mb="sm">
+              <Text size="sm" fw={500}>响应结果</Text>
               {testResult && (
-                <div className="flex items-center gap-2">
-                  <Badge 
-                    variant={testResult.success ? 'success' : 'destructive'}
-                    className="cursor-pointer"
+                <Group gap="xs">
+                  <Badge
+                    color={testResult.success ? 'teal' : 'red'}
+                    variant="light"
+                    leftSection={testResult.success ? <IconCircleCheck size={12} /> : <IconCircleX size={12} />}
+                    style={{ cursor: 'pointer' }}
                     onClick={() => setShowRequestInfo(!showRequestInfo)}
-                    title="点击查看请求详情"
                   >
-                    {testResult.success ? (
-                      <CheckCircle className="mr-1 h-3 w-3" />
-                    ) : (
-                      <XCircle className="mr-1 h-3 w-3" />
-                    )}
                     {testResult.statusCode || (testResult.success ? '成功' : '失败')}
                   </Badge>
                   {responseTimeText && (
-                    <Badge variant="outline" className="font-mono">
-                      <Clock className="mr-1 h-3 w-3" />
+                    <Badge variant="outline" leftSection={<IconClock size={12} />}>
                       {responseTimeText}
                     </Badge>
                   )}
                   {testResult.rawResponse && (
-                    <button
-                      className="text-muted-foreground hover:text-foreground"
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
                       onClick={() => navigator.clipboard.writeText(testResult.rawResponse || '')}
-                      title="复制响应内容"
                     >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
+                      <IconCopy size={14} />
+                    </ActionIcon>
                   )}
-                </div>
+                </Group>
               )}
-            </div>
-            
+            </Group>
+
             {/* 请求详情展开 */}
-            {showRequestInfo && testResult && (
-              <div className="mb-3 rounded-lg border bg-muted/30 p-3 text-xs space-y-2 animate-in slide-in-from-top-2">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Info className="h-3.5 w-3.5" />
-                  <span className="font-medium">请求信息</span>
-                </div>
-                <div className="space-y-1 font-mono">
-                  <div className="flex">
-                    <span className="w-16 shrink-0 text-muted-foreground">状态码:</span>
-                    <span className={testResult.success ? 'text-green-600' : 'text-red-600'}>
-                      {testResult.statusCode || 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex">
-                    <span className="w-16 shrink-0 text-muted-foreground">耗时:</span>
-                    <span>{testResult.responseTime || 0}ms</span>
-                  </div>
-                  <div className="flex">
-                    <span className="w-16 shrink-0 text-muted-foreground">大小:</span>
-                    <span>{((testResult.rawResponse?.length || 0) / 1024).toFixed(1)}KB</span>
-                  </div>
-                </div>
-                {testResult.error && (
-                  <div className="mt-2 flex items-start gap-2 rounded bg-destructive/10 p-2 text-destructive">
-                    <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                    <span className="break-all">{testResult.error}</span>
-                  </div>
+            <Collapse in={showRequestInfo && !!testResult}>
+              <Paper withBorder p="sm" mb="sm" bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'}>
+                <Group gap="xs" mb="xs">
+                  <IconInfoCircle size={14} />
+                  <Text size="xs" fw={500}>请求信息</Text>
+                </Group>
+                <Stack gap={4} style={{ fontFamily: 'monospace' }}>
+                  <Group gap="xs">
+                    <Text size="xs" c="dimmed" w={60}>状态码:</Text>
+                    <Text size="xs" c={testResult?.success ? 'teal' : 'red'}>
+                      {testResult?.statusCode || 'N/A'}
+                    </Text>
+                  </Group>
+                  <Group gap="xs">
+                    <Text size="xs" c="dimmed" w={60}>耗时:</Text>
+                    <Text size="xs">{testResult?.responseTime || 0}ms</Text>
+                  </Group>
+                  <Group gap="xs">
+                    <Text size="xs" c="dimmed" w={60}>大小:</Text>
+                    <Text size="xs">{((testResult?.rawResponse?.length || 0) / 1024).toFixed(1)}KB</Text>
+                  </Group>
+                </Stack>
+                {testResult?.error && (
+                  <Paper withBorder p="xs" mt="xs" bg="red.0">
+                    <Group gap="xs">
+                      <IconAlertCircle size={14} color="var(--mantine-color-red-6)" />
+                      <Text size="xs" c="red" style={{ wordBreak: 'break-all' }}>{testResult.error}</Text>
+                    </Group>
+                  </Paper>
                 )}
-              </div>
-            )}
+              </Paper>
+            </Collapse>
 
             {isLoading ? (
-              <div className="flex h-40 items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-              </div>
+              <Box py="xl" ta="center">
+                <Loader size="md" />
+              </Box>
             ) : testResult ? (
-              <Tabs value={activeResultTab} onValueChange={setActiveResultTab}>
-                <TabsList className="w-full">
-                  <TabsTrigger value="visual" className="flex-1">
-                    可视化
-                  </TabsTrigger>
-                  <TabsTrigger value="parsed" className="flex-1">
-                    解析结果
-                  </TabsTrigger>
-                  <TabsTrigger value="raw" className="flex-1">
-                    原始响应
-                  </TabsTrigger>
-                </TabsList>
+              <Tabs value={activeResultTab} onChange={setActiveResultTab}>
+                <Tabs.List>
+                  <Tabs.Tab value="visual">可视化</Tabs.Tab>
+                  <Tabs.Tab value="parsed">解析结果</Tabs.Tab>
+                  <Tabs.Tab value="raw">原始响应</Tabs.Tab>
+                </Tabs.List>
 
-                <TabsContent value="visual" className="mt-3">
+                <Tabs.Panel value="visual" pt="sm">
                   {/* 书籍列表 */}
                   {visualData.books.length > 0 && (
-                    <div className="rounded-lg border">
-                      <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-                        {testMode === 'explore' ? <Compass className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
-                        {testMode === 'explore' ? '发现结果' : '搜索结果'} ({visualData.books.length}本)
-                        <span className="ml-auto text-xs text-muted-foreground">点击查看详情</span>
-                      </div>
-                      <ScrollArea className="max-h-60">
-                        <div className="divide-y">
+                    <Paper withBorder>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                        {testMode === 'explore' ? <IconCompass size={16} /> : <IconWorld size={16} />}
+                        <Text size="sm" fw={500}>
+                          {testMode === 'explore' ? '发现结果' : '搜索结果'} ({visualData.books.length}本)
+                        </Text>
+                        <Text size="xs" c="dimmed" ml="auto">点击查看详情</Text>
+                      </Group>
+                      <ScrollArea.Autosize mah={240}>
+                        <Stack gap={0}>
                           {visualData.books.map((book, index) => (
-                            <div
+                            <Box
                               key={index}
-                              className="flex cursor-pointer gap-3 p-3 hover:bg-accent transition-colors"
-                              onClick={() => {
-                                if (book.bookUrl) {
-                                  runTestWithParams('detail', book.bookUrl);
-                                }
-                              }}
-                              title={book.bookUrl ? `点击查看详情: ${book.bookUrl}` : '无书籍链接'}
+                              p="sm"
+                              style={(theme) => ({
+                                cursor: 'pointer',
+                                borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[5] : theme.colors.gray[2]}`,
+                                '&:hover': { backgroundColor: colorScheme === 'dark' ? theme.colors.dark[5] : theme.colors.gray[0] },
+                              })}
+                              onClick={() => book.bookUrl && runTestWithParams('detail', book.bookUrl)}
                             >
-                              <div className="h-16 w-12 shrink-0 overflow-hidden rounded bg-muted">
-                                {book.coverUrl ? (
-                                  <img
-                                    src={book.coverUrl}
-                                    alt={book.name}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <div className="flex h-full items-center justify-center">
-                                    <Book className="h-6 w-6 text-muted-foreground" />
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex-1 overflow-hidden">
-                                <div className="truncate font-medium">
-                                  {book.name}
-                                </div>
-                                {book.author && (
-                                  <div className="truncate text-xs text-muted-foreground">
-                                    {book.author}
-                                  </div>
-                                )}
-                                {book.intro && (
-                                  <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                                    {book.intro}
-                                  </div>
-                                )}
-                              </div>
-                              <ChevronRight className="h-4 w-4 shrink-0 self-center text-muted-foreground" />
-                            </div>
+                              <Group gap="sm" wrap="nowrap">
+                                <Box w={48} h={64} style={{ flexShrink: 0, borderRadius: 4, overflow: 'hidden', backgroundColor: 'var(--mantine-color-gray-2)' }}>
+                                  {book.coverUrl ? (
+                                    <Image src={book.coverUrl} alt={book.name} w={48} h={64} fit="cover" />
+                                  ) : (
+                                    <Box h="100%" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      <IconBook size={24} color="var(--mantine-color-dimmed)" />
+                                    </Box>
+                                  )}
+                                </Box>
+                                <Box style={{ flex: 1, overflow: 'hidden' }}>
+                                  <Text size="sm" fw={500} lineClamp={1}>{book.name}</Text>
+                                  {book.author && <Text size="xs" c="dimmed" lineClamp={1}>{book.author}</Text>}
+                                  {book.intro && <Text size="xs" c="dimmed" lineClamp={2} mt={4}>{book.intro}</Text>}
+                                </Box>
+                                <IconChevronRight size={16} color="var(--mantine-color-dimmed)" />
+                              </Group>
+                            </Box>
                           ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
+                        </Stack>
+                      </ScrollArea.Autosize>
+                    </Paper>
                   )}
 
                   {/* 书籍详情 */}
                   {visualData.bookDetail && (
-                    <div className="rounded-lg border">
-                      <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-                        <Book className="h-4 w-4" />
-                        书籍详情
-                      </div>
-                      <div className="p-4">
-                        <div className="flex gap-4">
-                          {/* 封面 */}
-                          <div className="h-32 w-24 shrink-0 overflow-hidden rounded-lg bg-muted">
+                    <Paper withBorder>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                        <IconBook size={16} />
+                        <Text size="sm" fw={500}>书籍详情</Text>
+                      </Group>
+                      <Box p="sm">
+                        <Group gap="md" align="flex-start">
+                          <Box w={96} h={128} style={{ flexShrink: 0, borderRadius: 8, overflow: 'hidden', backgroundColor: 'var(--mantine-color-gray-2)' }}>
                             {visualData.bookDetail.coverUrl ? (
-                              <img
-                                src={visualData.bookDetail.coverUrl}
-                                alt={visualData.bookDetail.name}
-                                className="h-full w-full object-cover"
-                              />
+                              <Image src={visualData.bookDetail.coverUrl} alt={visualData.bookDetail.name} w={96} h={128} fit="cover" />
                             ) : (
-                              <div className="flex h-full items-center justify-center">
-                                <Book className="h-8 w-8 text-muted-foreground" />
-                              </div>
+                              <Box h="100%" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <IconBook size={32} color="var(--mantine-color-dimmed)" />
+                              </Box>
                             )}
-                          </div>
-                          {/* 信息 */}
-                          <div className="flex-1 space-y-2">
-                            <div className="text-lg font-semibold">{visualData.bookDetail.name}</div>
+                          </Box>
+                          <Stack gap="xs" style={{ flex: 1 }}>
+                            <Text size="lg" fw={600}>{visualData.bookDetail.name}</Text>
                             {visualData.bookDetail.author && (
-                              <div className="text-sm text-muted-foreground">
-                                作者：{visualData.bookDetail.author}
-                              </div>
+                              <Text size="sm" c="dimmed">作者：{visualData.bookDetail.author}</Text>
                             )}
                             {visualData.bookDetail.kind && (
-                              <div className="flex flex-wrap gap-1">
+                              <Group gap={4}>
                                 {visualData.bookDetail.kind.split(/[,，]/).map((tag: string, i: number) => (
-                                  <Badge key={i} variant="secondary" className="text-xs">
-                                    {tag.trim()}
-                                  </Badge>
+                                  <Badge key={i} size="xs" variant="light">{tag.trim()}</Badge>
                                 ))}
-                              </div>
+                              </Group>
                             )}
                             {visualData.bookDetail.lastChapter && (
-                              <div className="text-xs text-muted-foreground">
-                                最新：{visualData.bookDetail.lastChapter}
-                              </div>
+                              <Text size="xs" c="dimmed">最新：{visualData.bookDetail.lastChapter}</Text>
                             )}
-                            {visualData.bookDetail.updateTime && (
-                              <div className="text-xs text-muted-foreground">
-                                更新：{visualData.bookDetail.updateTime}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        {/* 简介 */}
+                          </Stack>
+                        </Group>
                         {visualData.bookDetail.intro && (
-                          <div className="mt-4">
-                            <div className="mb-1 text-sm font-medium">简介</div>
-                            <div className="max-h-24 overflow-y-auto text-sm text-muted-foreground leading-relaxed">
-                              {visualData.bookDetail.intro}
-                            </div>
-                          </div>
+                          <Box mt="sm">
+                            <Text size="sm" fw={500} mb={4}>简介</Text>
+                            <ScrollArea.Autosize mah={96}>
+                              <Text size="sm" c="dimmed" style={{ lineHeight: 1.6 }}>{visualData.bookDetail.intro}</Text>
+                            </ScrollArea.Autosize>
+                          </Box>
                         )}
-                        {/* 查看目录按钮 */}
                         {visualData.bookDetail.tocUrl && (
                           <Button
-                            className="mt-4 w-full"
-                            onClick={() => {
-                              runTestWithParams('toc', visualData.bookDetail!.tocUrl);
-                            }}
+                            fullWidth
+                            mt="sm"
+                            leftSection={<IconList size={16} />}
+                            onClick={() => runTestWithParams('toc', visualData.bookDetail!.tocUrl)}
                           >
-                            <List className="mr-2 h-4 w-4" />
                             查看目录
                           </Button>
                         )}
-                      </div>
-                    </div>
+                      </Box>
+                    </Paper>
                   )}
 
                   {/* 章节列表 */}
                   {visualData.chapters.length > 0 && (
-                    <div className="rounded-lg border">
-                      <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-                        <List className="h-4 w-4" />
-                        目录 ({visualData.chapters.length}章)
-                        <span className="ml-auto text-xs text-muted-foreground">点击查看正文</span>
-                      </div>
-                      <ScrollArea className="max-h-60">
-                        <div className="divide-y">
+                    <Paper withBorder>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                        <IconList size={16} />
+                        <Text size="sm" fw={500}>目录 ({visualData.chapters.length}章)</Text>
+                        {visualData.chapters.some(ch => ch.url) && (
+                          <Text size="xs" c="dimmed" ml="auto">点击查看正文</Text>
+                        )}
+                      </Group>
+                      <ScrollArea.Autosize mah={240}>
+                        <Stack gap={0}>
                           {visualData.chapters.map((chapter, index) => (
-                            <div
+                            <Group
                               key={index}
-                              className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-accent transition-colors"
-                              onClick={() => {
-                                if (chapter.url) {
-                                  runTestWithParams('content', chapter.url);
-                                }
-                              }}
-                              title={chapter.url ? `点击查看正文: ${chapter.url}` : '无章节链接'}
+                              px="sm"
+                              py="xs"
+                              gap="sm"
+                              style={(theme) => ({
+                                cursor: chapter.url ? 'pointer' : 'default',
+                                borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[5] : theme.colors.gray[2]}`,
+                                '&:hover': chapter.url ? { backgroundColor: colorScheme === 'dark' ? theme.colors.dark[5] : theme.colors.gray[1] } : {},
+                              })}
+                              onClick={() => chapter.url && runTestWithParams('content', chapter.url)}
                             >
-                              <span className="flex h-6 w-8 shrink-0 items-center justify-center rounded bg-muted text-xs text-muted-foreground">
-                                {index + 1}
-                              </span>
-                              <span className="flex-1 truncate text-sm">
-                                {chapter.name}
-                              </span>
-                              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            </div>
+                              <Badge size="sm" variant="light" color="gray">{index + 1}</Badge>
+                              <Text size="sm" style={{ flex: 1 }} lineClamp={1}>{chapter.name}</Text>
+                              {chapter.url ? (
+                                <IconChevronRight size={16} color="var(--mantine-color-dimmed)" />
+                              ) : (
+                                <Badge size="xs" variant="light" color="yellow">无链接</Badge>
+                              )}
+                            </Group>
                           ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
+                        </Stack>
+                      </ScrollArea.Autosize>
+                    </Paper>
                   )}
 
                   {/* 正文内容 */}
                   {visualData.content && (
-                    <div className="rounded-lg border">
-                      <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-                        <FileText className="h-4 w-4" />
-                        正文内容
-                      </div>
-                      <ScrollArea className="max-h-60">
-                        <div className="whitespace-pre-wrap p-3 text-sm leading-relaxed">
-                          {visualData.content}
-                        </div>
-                      </ScrollArea>
-                    </div>
+                    <Paper withBorder>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                        <IconFileText size={16} />
+                        <Text size="sm" fw={500}>正文内容</Text>
+                      </Group>
+                      <ScrollArea.Autosize mah={240}>
+                        <Box p="sm">
+                          <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{visualData.content}</Text>
+                        </Box>
+                      </ScrollArea.Autosize>
+                    </Paper>
                   )}
 
-                  {/* 图片内容（图片书源） */}
+                  {/* 图片内容 */}
                   {visualData.imageUrls && visualData.imageUrls.length > 0 && (
-                    <div className="rounded-lg border">
-                      <div className="flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
-                        <Image className="h-4 w-4" />
-                        图片内容 ({visualData.imageUrls.length}张)
-                      </div>
-                      <ScrollArea className="max-h-80">
-                        <div className="grid grid-cols-2 gap-2 p-3">
+                    <Paper withBorder>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                        <IconPhoto size={16} />
+                        <Text size="sm" fw={500}>图片内容 ({visualData.imageUrls.length}张)</Text>
+                      </Group>
+                      <ScrollArea.Autosize mah={320}>
+                        <Box p="sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                           {visualData.imageUrls.map((url, index) => (
-                            <div
-                              key={index}
-                              className="group relative aspect-[3/4] overflow-hidden rounded-lg border bg-muted"
-                            >
-                              <img
-                                src={url}
-                                alt={`第${index + 1}页`}
-                                className="h-full w-full object-contain"
-                                loading="lazy"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = '';
-                                  (e.target as HTMLImageElement).alt = '加载失败';
-                                }}
-                              />
-                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1 text-center text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
-                                第{index + 1}页
-                              </div>
-                            </div>
+                            <Box key={index} style={{ aspectRatio: '3/4', borderRadius: 8, overflow: 'hidden', backgroundColor: 'var(--mantine-color-gray-2)' }}>
+                              <Image src={url} alt={`第${index + 1}页`} fit="contain" h="100%" />
+                            </Box>
                           ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
+                        </Box>
+                      </ScrollArea.Autosize>
+                    </Paper>
                   )}
 
                   {/* 无数据 */}
-                  {!visualData.books.length &&
-                    !visualData.chapters.length &&
-                    !visualData.content &&
-                    !visualData.bookDetail &&
-                    (!visualData.imageUrls || visualData.imageUrls.length === 0) && (
-                      <div className="flex h-40 items-center justify-center text-muted-foreground">
-                        暂无可视化数据
-                      </div>
-                    )}
-                </TabsContent>
-
-                <TabsContent value="parsed" className="mt-3">
-                  {testResult.parsedData && testResult.parsedData.length > 0 ? (
-                    <div className="space-y-1">
-                      {testResult.parsedData.map((item, index) => (
-                        <div
-                          key={index}
-                          className={cn(
-                            'flex rounded border-l-2 bg-muted/50 px-3 py-2 text-sm',
-                            item.matched
-                              ? 'border-l-green-500'
-                              : 'border-l-border'
-                          )}
-                        >
-                          <span className="mr-2 shrink-0 font-medium text-primary">
-                            {item.key}
-                          </span>
-                          <span className="break-all">{item.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex h-40 items-center justify-center text-muted-foreground">
-                      暂无解析结果
-                    </div>
+                  {!visualData.books.length && !visualData.chapters.length && !visualData.content && !visualData.bookDetail && (!visualData.imageUrls || visualData.imageUrls.length === 0) && (
+                    <Box py="xl" ta="center">
+                      <Text c="dimmed">暂无可视化数据</Text>
+                    </Box>
                   )}
-                </TabsContent>
+                </Tabs.Panel>
 
-                <TabsContent value="raw" className="mt-3">
-                  <ScrollArea className="h-60">
-                    <pre className="whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs">
+                <Tabs.Panel value="parsed" pt="sm">
+                  {testResult.parsedData && testResult.parsedData.length > 0 ? (
+                    <Stack gap={4}>
+                      {testResult.parsedData.map((item, index) => (
+                        <Paper
+                          key={index}
+                          p="xs"
+                          withBorder
+                          style={{ borderLeftWidth: 3, borderLeftColor: item.matched ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-gray-4)' }}
+                        >
+                          <Group gap="xs" wrap="nowrap">
+                            <Text size="xs" fw={500} c="teal" style={{ flexShrink: 0 }}>{item.key}</Text>
+                            <Text size="xs" style={{ wordBreak: 'break-all' }}>{item.value}</Text>
+                          </Group>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Box py="xl" ta="center">
+                      <Text c="dimmed">暂无解析结果</Text>
+                    </Box>
+                  )}
+                </Tabs.Panel>
+
+                <Tabs.Panel value="raw" pt="sm">
+                  <ScrollArea.Autosize mah={240}>
+                    <Paper p="sm" bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'} style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                       {testResult.rawResponse || '无响应内容'}
-                    </pre>
-                  </ScrollArea>
-                </TabsContent>
+                    </Paper>
+                  </ScrollArea.Autosize>
+                </Tabs.Panel>
               </Tabs>
             ) : (
-              <div className="flex h-40 items-center justify-center text-muted-foreground">
-                点击发送按钮开始测试
-              </div>
+              <Box py="xl" ta="center">
+                <Text c="dimmed">点击测试按钮开始测试</Text>
+              </Box>
             )}
-          </div>
-        </div>
+          </Box>
+        </Stack>
       </ScrollArea>
-    </div>
+    </Box>
   );
 }

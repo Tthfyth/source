@@ -82,6 +82,17 @@ const createDefaultSource = (): BookSource => ({
   },
 });
 
+// 声明全局 fileApi
+declare global {
+  interface Window {
+    fileApi?: {
+      saveSourceToFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+      selectSavePath: (defaultPath?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+      openFile: () => Promise<{ success: boolean; canceled?: boolean; filePath?: string; content?: string; error?: string }>;
+    };
+  }
+}
+
 interface BookSourceState {
   // 书源列表
   sources: BookSource[];
@@ -91,6 +102,8 @@ interface BookSourceState {
   sourceCode: string;
   // 是否有未保存的修改
   isModified: boolean;
+  // 导入的文件路径（用于同步保存）
+  loadedFilePath: string | null;
   // 调试日志
   debugLogs: DebugLog[];
   // 日志过滤器
@@ -119,8 +132,9 @@ interface BookSourceState {
   createSource: () => BookSource;
   updateSourceCode: (code: string) => void;
   saveCurrentSource: () => boolean;
+  saveToFile: () => Promise<boolean>;
   deleteSource: (url: string) => void;
-  importSources: (jsonStr: string) => number;
+  importSources: (jsonStr: string, filePath?: string) => number;
   exportSources: (urls?: string[]) => string;
   clearAllSources: () => void;
   addLog: (log: Omit<DebugLog, 'id' | 'timestamp'>) => void;
@@ -193,6 +207,7 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
   activeSourceId: null,
   sourceCode: '',
   isModified: false,
+  loadedFilePath: null,
   debugLogs: [],
   logFilters: ['request', 'parse', 'field', 'error'],
   testMode: 'search',
@@ -263,7 +278,11 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
         if (index !== -1) {
           sources[index] = parsed;
         }
-        set({ sources, isModified: false });
+        // 如果 bookSourceUrl 发生变化，需要更新 activeSourceId
+        const newActiveId = parsed.bookSourceUrl !== state.activeSourceId 
+          ? parsed.bookSourceUrl 
+          : state.activeSourceId;
+        set({ sources, activeSourceId: newActiveId, isModified: false });
       }
       return true;
     } catch {
@@ -290,7 +309,27 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
     });
   },
 
-  importSources: (jsonStr: string) => {
+  // 保存到文件（同步保存到导入的外部文件）
+  saveToFile: async () => {
+    const state = get();
+    if (!state.loadedFilePath) {
+      // 如果没有导入的文件路径，让用户选择保存位置
+      if (!window.fileApi) return false;
+      const result = await window.fileApi.selectSavePath();
+      if (!result.success || !result.filePath) return false;
+      set({ loadedFilePath: result.filePath });
+    }
+
+    const filePath = get().loadedFilePath;
+    if (!filePath || !window.fileApi) return false;
+
+    // 保存所有书源到文件
+    const content = JSON.stringify(state.sources, null, 2);
+    const result = await window.fileApi.saveSourceToFile(filePath, content);
+    return result.success;
+  },
+
+  importSources: (jsonStr: string, filePath?: string) => {
     try {
       // 尝试解析 JSON，处理可能的双重转义
       let data;
@@ -324,6 +363,8 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
         activeSourceId: firstSource.bookSourceUrl,
         sourceCode: JSON.stringify(firstSource, null, 2),
         isModified: false,
+        // 记录导入的文件路径
+        loadedFilePath: filePath || state.loadedFilePath,
       });
 
       return newSources.length;

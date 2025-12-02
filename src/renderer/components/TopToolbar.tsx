@@ -1,28 +1,28 @@
-import React from 'react';
 import {
-  Plus,
-  FolderOpen,
-  Save,
-  RefreshCw,
-  Settings,
-  Sparkles,
-  PanelLeft,
-  Terminal,
-  Code,
-  Sun,
-  Moon,
-  Trash2,
-} from 'lucide-react';
-import { Button } from './ui/button';
-import { Separator } from './ui/separator';
-import {
+  Group,
+  ActionIcon,
+  Button,
+  Text,
   Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from './ui/tooltip';
-import { toast } from './ui/toast';
+  Divider,
+  useMantineColorScheme,
+} from '@mantine/core';
+import { notifications } from '@mantine/notifications';
+import {
+  IconPlus,
+  IconFolderOpen,
+  IconDeviceFloppy,
+  IconRefresh,
+  IconSettings,
+  IconSparkles,
+  IconLayoutSidebar,
+  IconTerminal,
+  IconCode,
+  IconSun,
+  IconMoon,
+  IconTrash,
+} from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
-import { cn } from '../lib/utils';
 
 interface TopToolbarProps {
   isLeftCollapsed: boolean;
@@ -49,13 +49,15 @@ export function TopToolbar({
     sources,
     activeSourceId,
     isModified,
+    loadedFilePath,
     createSource,
     importSources,
     saveCurrentSource,
+    saveToFile,
     clearAllSources,
-    themeMode,
-    setThemeMode,
   } = useBookSourceStore();
+
+  const { colorScheme, toggleColorScheme } = useMantineColorScheme();
 
   const activeSource = sources.find(
     (s) => s.bookSourceUrl === activeSourceId
@@ -67,237 +69,251 @@ export function TopToolbar({
   };
 
   // 导入书源
-  const handleImport = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        const text = await file.text();
-        const count = importSources(text);
-        if (count > 0) {
-          toast.success(`成功导入 ${count} 个书源`);
-        } else {
-          toast.error('导入失败，请检查文件格式');
-        }
+  const handleImport = async () => {
+    // 使用 Electron dialog 选择文件，可以获取完整路径
+    if (window.fileApi) {
+      const result = await window.fileApi.openFile();
+      if (result.canceled) return;
+      if (!result.success || !result.content) {
+        notifications.show({
+          title: '导入失败',
+          message: result.error || '无法读取文件',
+          color: 'red',
+        });
+        return;
       }
-      // 清理 input 元素
-      input.remove();
-    };
-    input.click();
+      
+      const count = importSources(result.content, result.filePath);
+      if (count > 0) {
+        notifications.show({
+          title: '导入成功',
+          message: `成功导入 ${count} 个书源\n文件: ${result.filePath}`,
+          color: 'teal',
+        });
+      } else {
+        notifications.show({
+          title: '导入失败',
+          message: '请检查文件格式',
+          color: 'red',
+        });
+      }
+    } else {
+      // 降级方案：使用 input 元素（无法获取完整路径）
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) {
+          const text = await file.text();
+          const count = importSources(text);
+          if (count > 0) {
+            notifications.show({
+              title: '导入成功',
+              message: `成功导入 ${count} 个书源`,
+              color: 'teal',
+            });
+          } else {
+            notifications.show({
+              title: '导入失败',
+              message: '请检查文件格式',
+              color: 'red',
+            });
+          }
+        }
+        input.remove();
+      };
+      input.click();
+    }
   };
 
-  // 保存书源
-  const handleSave = () => {
+  // 保存书源（内存 + 文件）
+  const handleSave = async () => {
     if (saveCurrentSource()) {
-      toast.success('保存成功');
+      // 如果有导入的文件路径，同步保存到文件
+      if (loadedFilePath) {
+        const fileResult = await saveToFile();
+        if (fileResult) {
+          notifications.show({
+            title: '保存成功',
+            message: `书源已保存到: ${loadedFilePath}`,
+            color: 'teal',
+          });
+        } else {
+          notifications.show({
+            title: '内存保存成功',
+            message: '但文件保存失败，请检查文件权限',
+            color: 'yellow',
+          });
+        }
+      } else {
+        notifications.show({
+          title: '保存成功',
+          message: '书源已保存到内存',
+          color: 'teal',
+        });
+      }
     } else {
-      toast.error('保存失败，请检查JSON格式');
+      notifications.show({
+        title: '保存失败',
+        message: '请检查JSON格式',
+        color: 'red',
+      });
     }
   };
 
   // 清空书源
   const handleClear = () => {
     if (sources.length === 0) {
-      toast.info('书源列表已为空');
+      notifications.show({
+        message: '书源列表已为空',
+        color: 'blue',
+      });
       return;
     }
     if (window.confirm(`确定要清空所有 ${sources.length} 个书源吗？此操作不可恢复！`)) {
       clearAllSources();
-      toast.success('已清空所有书源');
+      notifications.show({
+        title: '已清空',
+        message: '所有书源已清空',
+        color: 'teal',
+      });
     }
   };
 
-  // 切换主题
-  const toggleTheme = () => {
-    setThemeMode(themeMode === 'dark' ? 'light' : 'dark');
-  };
-
   return (
-    <div className="flex h-12 items-center justify-between border-b bg-card px-3">
+    <Group
+      h={48}
+      px="sm"
+      justify="space-between"
+      style={(theme) => ({
+        borderBottom: `1px solid ${
+          colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]
+        }`,
+        backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+      })}
+    >
       {/* 左侧操作按钮 */}
-      <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={isLeftCollapsed ? 'ghost' : 'secondary'}
-              size="icon"
-              className="h-8 w-8"
-              onClick={onToggleLeft}
+      <Group gap="xs">
+        <Tooltip label="切换书源列表 (Ctrl+B)" position="bottom">
+          <ActionIcon
+            variant={isLeftCollapsed ? 'subtle' : 'light'}
+            size="lg"
+            onClick={onToggleLeft}
+          >
+            <IconLayoutSidebar size={18} />
+          </ActionIcon>
+        </Tooltip>
+
+        <Divider orientation="vertical" mx={4} />
+
+        <Group gap={4}>
+          <Tooltip label="新建书源" position="bottom">
+            <ActionIcon variant="subtle" size="lg" onClick={handleCreate}>
+              <IconPlus size={18} />
+            </ActionIcon>
+          </Tooltip>
+
+          <Tooltip label="导入书源" position="bottom">
+            <ActionIcon variant="subtle" size="lg" onClick={handleImport}>
+              <IconFolderOpen size={18} />
+            </ActionIcon>
+          </Tooltip>
+
+          <Tooltip label="清空书源" position="bottom">
+            <ActionIcon
+              variant="subtle"
+              size="lg"
+              color="red"
+              onClick={handleClear}
+              disabled={sources.length === 0}
             >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>切换书源列表 (Ctrl+B)</TooltipContent>
+              <IconTrash size={18} />
+            </ActionIcon>
+          </Tooltip>
+
+          <Tooltip label="保存 (Ctrl+S)" position="bottom">
+            <ActionIcon
+              variant="subtle"
+              size="lg"
+              onClick={handleSave}
+              disabled={!isModified}
+            >
+              <IconDeviceFloppy size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+
+        <Divider orientation="vertical" mx={4} />
+
+        <Tooltip label="测试所有书源" position="bottom">
+          <ActionIcon variant="subtle" size="lg">
+            <IconRefresh size={18} />
+          </ActionIcon>
         </Tooltip>
-
-        <Separator orientation="vertical" className="mx-1 h-5" />
-
-        <div className="flex gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleCreate}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>新建书源</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleImport}
-              >
-                <FolderOpen className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>导入书源</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive hover:text-destructive"
-                onClick={handleClear}
-                disabled={sources.length === 0}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>清空书源</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleSave}
-                disabled={!isModified}
-              >
-                <Save className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>保存 (Ctrl+S)</TooltipContent>
-          </Tooltip>
-        </div>
-
-        <Separator orientation="vertical" className="mx-1 h-5" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>测试所有书源</TooltipContent>
-        </Tooltip>
-      </div>
+      </Group>
 
       {/* 中间标题 */}
-      <div className="flex items-center gap-2 text-sm">
-        <span className="font-semibold">Legado 书源调试器</span>
+      <Group gap="xs">
+        <Text fw={600} size="sm">Legado 书源调试器</Text>
         {activeSource && (
           <>
-            <span className="text-muted-foreground">-</span>
-            <span className="text-muted-foreground">
-              {activeSource.bookSourceName}
-            </span>
+            <Text c="dimmed" size="sm">-</Text>
+            <Text c="dimmed" size="sm">{activeSource.bookSourceName}</Text>
             {isModified && (
-              <span className="text-primary">●</span>
+              <Text c="teal" size="sm">●</Text>
             )}
           </>
         )}
-      </div>
+      </Group>
 
       {/* 右侧操作按钮 */}
-      <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button 
-              variant={isAICollapsed ? 'ghost' : 'secondary'} 
-              size="sm" 
-              className="h-8 gap-1.5"
-              onClick={onToggleAI}
-            >
-              <Sparkles className="h-4 w-4" />
-              AI识别
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>切换AI助手面板</TooltipContent>
+      <Group gap="xs">
+        <Tooltip label="切换AI助手面板" position="bottom">
+          <Button
+            variant={isAICollapsed ? 'subtle' : 'light'}
+            size="xs"
+            leftSection={<IconSparkles size={16} />}
+            onClick={onToggleAI}
+          >
+            AI识别
+          </Button>
         </Tooltip>
 
-        <Separator orientation="vertical" className="mx-1 h-5" />
+        <Divider orientation="vertical" mx={4} />
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={isBottomCollapsed ? 'ghost' : 'secondary'}
-              size="icon"
-              className="h-8 w-8"
-              onClick={onToggleBottom}
-            >
-              <Terminal className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>切换控制台 (Ctrl+`)</TooltipContent>
+        <Tooltip label="切换控制台 (Ctrl+`)" position="bottom">
+          <ActionIcon
+            variant={isBottomCollapsed ? 'subtle' : 'light'}
+            size="lg"
+            onClick={onToggleBottom}
+          >
+            <IconTerminal size={18} />
+          </ActionIcon>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={isRightCollapsed ? 'ghost' : 'secondary'}
-              size="icon"
-              className="h-8 w-8"
-              onClick={onToggleRight}
-            >
-              <Code className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>切换调试面板 (Ctrl+Shift+D)</TooltipContent>
+        <Tooltip label="切换调试面板 (Ctrl+Shift+D)" position="bottom">
+          <ActionIcon
+            variant={isRightCollapsed ? 'subtle' : 'light'}
+            size="lg"
+            onClick={onToggleRight}
+          >
+            <IconCode size={18} />
+          </ActionIcon>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={toggleTheme}
-            >
-              {themeMode === 'dark' ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {themeMode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
-          </TooltipContent>
+        <Tooltip label={colorScheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'} position="bottom">
+          <ActionIcon variant="subtle" size="lg" onClick={() => toggleColorScheme()}>
+            {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+          </ActionIcon>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <Settings className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>设置</TooltipContent>
+        <Tooltip label="设置" position="bottom">
+          <ActionIcon variant="subtle" size="lg">
+            <IconSettings size={18} />
+          </ActionIcon>
         </Tooltip>
-      </div>
-    </div>
+      </Group>
+    </Group>
   );
 }

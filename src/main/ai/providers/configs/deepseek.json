@@ -1,0 +1,36 @@
+{
+  "id": "deepseek",
+  "displayName": "DeepSeek",
+  "baseUrl": "https://api.deepseek.com/v1",
+  "apiKeyTemplate": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "apiKeyUrl": "https://platform.deepseek.com/api_keys",
+  "sdkMode": "openai",
+  "priority": 2,
+  "monthlyLimit": 5000000,
+  "models": [
+    {
+      "id": "deepseek-chat",
+      "name": "DeepSeek-V3",
+      "tooltip": "DeepSeek-V3 对话模型 - 性价比极高，代码能力强",
+      "maxInputTokens": 64000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "deepseek-chat-anthropic",
+      "name": "DeepSeek-V3 (Anthropic)",
+      "model": "deepseek-chat",
+      "sdkMode": "anthropic",
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "tooltip": "DeepSeek-V3 使用 Anthropic SDK 模式",
+      "maxInputTokens": 64000,
+      "maxOutputTokens": 8192
+    },
+    {
+      "id": "deepseek-reasoner",
+      "name": "DeepSeek-R1 推理",
+      "tooltip": "DeepSeek-R1 推理模型 - 深度思考，适合复杂任务",
+      "maxInputTokens": 64000,
+      "maxOutputTokens": 8192
+    }
+  ]
+}
