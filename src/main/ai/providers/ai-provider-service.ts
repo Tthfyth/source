@@ -51,10 +51,18 @@ export class AIProviderService {
    * 加载用户配置
    */
   private loadConfig(): void {
+    console.log('[AIProviderService] 加载配置文件:', this.configPath);
     try {
       if (fs.existsSync(this.configPath)) {
         const data = JSON.parse(fs.readFileSync(this.configPath, 'utf-8'));
         this.userConfig = data;
+        console.log('[AIProviderService] 已加载配置，供应商数量:', this.userConfig.providers?.length);
+        // 打印每个供应商的 apiKey 状态（不打印实际 key）
+        this.userConfig.providers?.forEach(p => {
+          console.log(`[AIProviderService]   - ${p.id}: enabled=${p.enabled}, hasApiKey=${!!p.apiKey}`);
+        });
+      } else {
+        console.log('[AIProviderService] 配置文件不存在，使用默认配置');
       }
     } catch (error) {
       console.error('[AIProviderService] 加载配置失败:', error);
@@ -63,6 +71,7 @@ export class AIProviderService {
     // 确保所有供应商都有用户配置
     for (const provider of providerConfigs) {
       if (!this.userConfig.providers.find(p => p.id === provider.id)) {
+        console.log('[AIProviderService] 添加缺失的供应商配置:', provider.id);
         this.userConfig.providers.push({
           id: provider.id,
           enabled: false,
@@ -144,22 +153,38 @@ export class AIProviderService {
 
   /**
    * 更新供应商配置
+   * 只更新传入的非 undefined 字段，保留其他已有配置
    */
   updateProvider(providerId: string, updates: Partial<UserProviderConfig>): void {
+    console.log('[AIProviderService] updateProvider:', providerId, updates);
+    
+    // 过滤掉 undefined 值，只保留有效的更新
+    const filteredUpdates: Partial<UserProviderConfig> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        (filteredUpdates as any)[key] = value;
+      }
+    }
+    console.log('[AIProviderService] 过滤后的更新:', filteredUpdates);
+    
     const index = this.userConfig.providers.findIndex(p => p.id === providerId);
     if (index !== -1) {
       this.userConfig.providers[index] = {
         ...this.userConfig.providers[index],
-        ...updates,
+        ...filteredUpdates,
       };
+      console.log('[AIProviderService] 更新后的配置:', this.userConfig.providers[index]);
     } else {
-      this.userConfig.providers.push({
+      const newConfig = {
         id: providerId,
         enabled: false,
-        ...updates,
-      });
+        ...filteredUpdates,
+      };
+      this.userConfig.providers.push(newConfig);
+      console.log('[AIProviderService] 新增配置:', newConfig);
     }
     this.saveConfig();
+    console.log('[AIProviderService] 配置已保存到:', this.configPath);
   }
 
   /**

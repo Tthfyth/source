@@ -109,13 +109,18 @@ class AIService {
 
   /**
    * 更新供应商配置（兼容旧接口）
+   * 只传递非 undefined 的字段，避免覆盖已有配置
    */
   updateProvider(id: string, config: Partial<AIProvider>): void {
-    this.providerService.updateProvider(id, {
-      enabled: config.enabled,
-      apiKey: config.apiKey,
-      selectedModel: config.model,
-    });
+    const updates: Record<string, any> = {};
+    if (config.enabled !== undefined) updates.enabled = config.enabled;
+    if (config.apiKey !== undefined) updates.apiKey = config.apiKey;
+    if (config.model !== undefined) updates.selectedModel = config.model;
+    // 前端可能直接传 selectedModel
+    if ((config as any).selectedModel !== undefined) updates.selectedModel = (config as any).selectedModel;
+    
+    console.log('[AIService] updateProvider:', id, updates);
+    this.providerService.updateProvider(id, updates);
   }
 
   /**
