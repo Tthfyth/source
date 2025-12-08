@@ -1,34 +1,74 @@
-name: Test
+name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run ESLint
+        run: pnpm run lint
+
+      - name: TypeScript check
+        run: pnpm exec tsc --noEmit
+
+  build:
+    runs-on: ${{ matrix.os }}
+    needs: lint
+    
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
+      fail-fast: false
 
     steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Install Node.js and NPM
-        uses: actions/setup-node@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
         with:
-          node-version: 22
-          cache: npm
+          version: 8
 
-      - name: npm install
-        run: |
-          npm install
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
 
-      - name: npm test
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm run package
-          npm run lint
-          npm exec tsc
-          npm test
+        run: pnpm run build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Package application
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm run package

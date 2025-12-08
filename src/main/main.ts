@@ -22,7 +22,78 @@ class AppUpdater {
   constructor() {
     log.transports.file.level = 'info';
     autoUpdater.logger = log;
-    autoUpdater.checkForUpdatesAndNotify();
+    
+    // 配置自动更新
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    // 检查更新事件
+    autoUpdater.on('checking-for-update', () => {
+      log.info('正在检查更新...');
+      this.sendStatusToWindow('checking-for-update');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+      log.info('发现新版本:', info.version);
+      this.sendStatusToWindow('update-available', info);
+      // 显示更新对话框
+      if (mainWindow) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '发现新版本',
+          message: `发现新版本 ${info.version}，是否立即下载？`,
+          buttons: ['立即下载', '稍后提醒'],
+          defaultId: 0,
+        }).then(({ response }) => {
+          if (response === 0) {
+            autoUpdater.downloadUpdate();
+          }
+        });
+      }
+    });
+
+    autoUpdater.on('update-not-available', (info) => {
+      log.info('当前已是最新版本');
+      this.sendStatusToWindow('update-not-available', info);
+    });
+
+    autoUpdater.on('error', (err) => {
+      log.error('更新错误:', err);
+      this.sendStatusToWindow('error', err.message);
+    });
+
+    autoUpdater.on('download-progress', (progressObj) => {
+      log.info(`下载进度: ${progressObj.percent.toFixed(1)}%`);
+      this.sendStatusToWindow('download-progress', progressObj);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+      log.info('更新下载完成:', info.version);
+      this.sendStatusToWindow('update-downloaded', info);
+      // 显示安装对话框
+      if (mainWindow) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          title: '更新已就绪',
+          message: `新版本 ${info.version} 已下载完成，是否立即安装并重启？`,
+          buttons: ['立即安装', '稍后安装'],
+          defaultId: 0,
+        }).then(({ response }) => {
+          if (response === 0) {
+            autoUpdater.quitAndInstall();
+          }
+        });
+      }
+    });
+
+    // 启动时检查更新
+    autoUpdater.checkForUpdates();
+  }
+
+  sendStatusToWindow(status: string, data?: any) {
+    if (mainWindow) {
+      mainWindow.webContents.send('update-status', { status, data });
+    }
   }
 }
 
@@ -249,6 +320,57 @@ ipcMain.handle('file:openFile', async () => {
       error: error.message || String(error),
     };
   }
+});
+
+// ============================================
+// IPC 通信接口 - 应用更新
+// ============================================
+
+/**
+ * 手动检查更新
+ */
+ipcMain.handle('app:checkForUpdates', async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return {
+      success: true,
+      updateInfo: result?.updateInfo,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+/**
+ * 下载更新
+ */
+ipcMain.handle('app:downloadUpdate', async () => {
+  try {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || String(error),
+    };
+  }
+});
+
+/**
+ * 安装更新并重启
+ */
+ipcMain.handle('app:quitAndInstall', () => {
+  autoUpdater.quitAndInstall();
+});
+
+/**
+ * 获取应用版本
+ */
+ipcMain.handle('app:getVersion', () => {
+  return app.getVersion();
 });
 
 // ============================================

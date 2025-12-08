@@ -12,13 +12,13 @@
     "hot",
     "reload"
   ],
-  "homepage": "https://github.com/electron-react-boilerplate/electron-react-boilerplate#readme",
+  "homepage": "https://github.com/Tthfyth/source#readme",
   "bugs": {
-    "url": "https://github.com/electron-react-boilerplate/electron-react-boilerplate/issues"
+    "url": "https://github.com/Tthfyth/source/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/electron-react-boilerplate/electron-react-boilerplate.git"
+    "url": "git+https://github.com/Tthfyth/source.git"
   },
   "license": "MIT",
   "author": {
@@ -204,8 +204,8 @@
     "webpack-merge": "^6.0.1"
   },
   "build": {
-    "productName": "ElectronReact",
-    "appId": "org.erb.ElectronReact",
+    "productName": "SourceDebug",
+    "appId": "com.aerowang.sourcedebug",
     "asar": true,
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": "**\\*.{node,dll}",
@@ -264,8 +264,9 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "electron-react-boilerplate",
-      "repo": "electron-react-boilerplate"
+      "owner": "Tthfyth",
+      "repo": "source",
+      "releaseType": "release"
     }
   },
   "collective": {
@@ -274,12 +275,7 @@
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": ">=14.x",
-      "onFail": "error"
-    },
-    "packageManager": {
-      "name": "npm",
-      "version": ">=7.x",
+      "version": ">=18.x",
       "onFail": "error"
     }
   },

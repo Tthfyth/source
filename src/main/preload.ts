@@ -192,6 +192,53 @@ const aiApiHandler = {
 
 contextBridge.exposeInMainWorld('aiApi', aiApiHandler);
 
+// --------- 应用更新 API ---------
+const appApiHandler = {
+  /**
+   * 获取应用版本
+   */
+  getVersion: () => {
+    return ipcRenderer.invoke('app:getVersion');
+  },
+
+  /**
+   * 检查更新
+   */
+  checkForUpdates: () => {
+    return ipcRenderer.invoke('app:checkForUpdates');
+  },
+
+  /**
+   * 下载更新
+   */
+  downloadUpdate: () => {
+    return ipcRenderer.invoke('app:downloadUpdate');
+  },
+
+  /**
+   * 安装更新并重启
+   */
+  quitAndInstall: () => {
+    return ipcRenderer.invoke('app:quitAndInstall');
+  },
+
+  /**
+   * 监听更新状态
+   */
+  onUpdateStatus: (callback: (status: { status: string; data?: any }) => void) => {
+    const subscription = (_event: IpcRendererEvent, data: { status: string; data?: any }) => {
+      callback(data);
+    };
+    ipcRenderer.on('update-status', subscription);
+    return () => {
+      ipcRenderer.removeListener('update-status', subscription);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('appApi', appApiHandler);
+
 export type ElectronHandler = typeof electronHandler;
 export type DebugApiHandler = typeof debugApiHandler;
 export type AIApiHandler = typeof aiApiHandler;
+export type AppApiHandler = typeof appApiHandler;
