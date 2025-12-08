@@ -102,6 +102,9 @@ importers:
       react-router-dom:
         specifier: ^7.3.0
         version: 7.9.6(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      source-map-support:
+        specifier: ^0.5.21
+        version: 0.5.21
       xmldom-ts:
         specifier: ^0.3.1
         version: 0.3.1

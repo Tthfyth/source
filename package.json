@@ -102,6 +102,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.0",
+    "source-map-support": "^0.5.21",
     "@electron/notarize": "^3.0.0",
     "@mantine/code-highlight": "^8.3.9",
     "@mantine/core": "^8.3.9",
@@ -207,6 +208,7 @@
     "productName": "SourceDebug",
     "appId": "com.aerowang.sourcedebug",
     "asar": true,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "afterSign": ".erb/scripts/notarize.js",
     "asarUnpack": "**\\*.{node,dll}",
     "files": [
@@ -216,20 +218,25 @@
     ],
     "mac": {
       "notarize": false,
-      "target": {
-        "target": "default",
-        "arch": [
-          "arm64",
-          "x64"
-        ]
-      },
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
       "type": "distribution",
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "contents": [
         {
           "x": 130,
@@ -246,13 +253,21 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-win-${arch}-setup.${ext}"
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     },
     "directories": {
       "app": "release/app",
