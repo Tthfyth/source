@@ -8,6 +8,8 @@ import * as vm from 'vm';
 import * as crypto from 'crypto';
 import { syncHttpRequest } from './rule-parser';
 import { webView as puppeteerWebView } from './webview';
+import { CacheManager } from './cache-manager';
+import { CookieStore } from './cookie-manager';
 
 // JS 正则模式 - 参考 Legado AppPattern.kt
 // Pattern.compile("<js>([\\w\\W]*?)</js>|@js:([\\w\\W]*)", Pattern.CASE_INSENSITIVE)
@@ -22,12 +24,6 @@ const PAGE_PATTERN = /<([^>]*?,.*?)>|<(\d+)>/g;
 
 // URL 参数分隔模式
 const PARAM_PATTERN = /\s*,\s*(?=\{)/;
-
-// Cookie 存储 (简单实现)
-const cookieStore: Record<string, string> = {};
-
-// Cache 存储 (简单实现)
-const cacheStore: Record<string, any> = {};
 
 /**
  * URL 选项接口
@@ -438,12 +434,46 @@ export class AnalyzeUrl {
       const vmContext = vm.createContext(sandbox);
       
       // 先加载 jsLib（如果有）
+      // jsLib 可能是 JSON 对象（指向远程 JS 文件的 URL）或直接的 JS 代码
       const jsLib = this.variables['_jsLib'];
       if (jsLib) {
         try {
-          const convertedJsLib = this.convertRhinoToES6(jsLib);
-          const jsLibScript = new vm.Script(convertedJsLib);
-          jsLibScript.runInContext(vmContext, { timeout: 5000 });
+          // 检查是否是 JSON 对象
+          if (jsLib.trim().startsWith('{') && jsLib.trim().endsWith('}')) {
+            try {
+              const jsMap = JSON.parse(jsLib);
+              // 遍历 JSON 对象，下载并执行每个 JS 文件
+              for (const [key, url] of Object.entries(jsMap)) {
+                if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+                  // 从缓存或网络获取 JS 代码
+                  const cacheKey = `_jsLib_${url}`;
+                  let jsCode = CacheManager.get(cacheKey);
+                  if (!jsCode) {
+                    const response = syncHttpRequest(url);
+                    if (response.body) {
+                      jsCode = response.body;
+                      CacheManager.put(cacheKey, jsCode, 86400); // 缓存24小时
+                    }
+                  }
+                  if (jsCode) {
+                    const convertedJsLib = this.convertRhinoToES6(jsCode);
+                    const jsLibScript = new vm.Script(convertedJsLib);
+                    jsLibScript.runInContext(vmContext, { timeout: 10000 });
+                  }
+                }
+              }
+            } catch (jsonError) {
+              // 不是有效的 JSON，作为普通 JS 代码执行
+              const convertedJsLib = this.convertRhinoToES6(jsLib);
+              const jsLibScript = new vm.Script(convertedJsLib);
+              jsLibScript.runInContext(vmContext, { timeout: 5000 });
+            }
+          } else {
+            // 直接作为 JS 代码执行
+            const convertedJsLib = this.convertRhinoToES6(jsLib);
+            const jsLibScript = new vm.Script(convertedJsLib);
+            jsLibScript.runInContext(vmContext, { timeout: 5000 });
+          }
         } catch (e) {
           console.error('[AnalyzeUrl] jsLib execution error:', e);
         }
@@ -464,31 +494,40 @@ export class AnalyzeUrl {
   private createJsSandbox(result: any): Record<string, any> {
     const self = this;
 
-    // cookie 对象
+    // cookie 对象 - 使用持久化的 CookieStore
     const cookie = {
       getCookie: (tag: string, key?: string) => {
-        const cookies = cookieStore[tag] || '';
-        if (!key) return cookies;
-        const match = cookies.match(new RegExp(`${key}=([^;]+)`));
-        return match ? match[1] : '';
+        if (key) {
+          return CookieStore.getKey(tag, key);
+        }
+        return CookieStore.getCookie(tag);
       },
       setCookie: (tag: string, cookie: string) => {
-        cookieStore[tag] = cookie;
+        CookieStore.setCookie(tag, cookie);
+      },
+      replaceCookie: (tag: string, cookie: string) => {
+        CookieStore.replaceCookie(tag, cookie);
       },
       removeCookie: (tag: string) => {
-        delete cookieStore[tag];
+        CookieStore.removeCookie(tag);
+      },
+      contains: (tag: string, key: string) => {
+        return CookieStore.contains(tag, key);
       },
     };
 
-    // cache 对象
+    // cache 对象 - 使用持久化的 CacheManager
     const cache = {
-      get: (key: string) => cacheStore[key],
+      get: (key: string) => CacheManager.get(key),
       put: (key: string, value: any, saveTime?: number) => {
-        cacheStore[key] = value;
+        CacheManager.put(key, value, saveTime || 0);
       },
       delete: (key: string) => {
-        delete cacheStore[key];
+        CacheManager.delete(key);
       },
+      getInt: (key: string) => CacheManager.getInt(key),
+      getLong: (key: string) => CacheManager.getLong(key),
+      getDouble: (key: string) => CacheManager.getDouble(key),
     };
 
     return {
@@ -964,13 +1003,14 @@ export class AnalyzeUrl {
         try {
           // 检查缓存
           const cacheKey = `_reload_${url}`;
-          if (cacheStore[cacheKey]) {
-            return cacheStore[cacheKey];
+          const cached = CacheManager.get(cacheKey);
+          if (cached) {
+            return cached;
           }
           // 从网络加载
           const response = syncHttpRequest(url);
           if (response.body) {
-            cacheStore[cacheKey] = response.body;
+            CacheManager.put(cacheKey, response.body, 3600); // 缓存1小时
             return response.body;
           }
           return '';

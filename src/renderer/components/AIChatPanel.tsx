@@ -358,13 +358,20 @@ export function AIChatPanel() {
       
       if (state.aiAnalysisEnabled && state.testResult?.rawResponse) {
         const activeSource = state.sources.find(s => s.bookSourceUrl === state.activeSourceId);
+        // 根据源格式提取规则信息
         const sourceInfo = activeSource ? JSON.stringify({
           bookSourceUrl: activeSource.bookSourceUrl,
           bookSourceName: activeSource.bookSourceName,
-          ruleSearch: activeSource.ruleSearch,
-          ruleBookInfo: activeSource.ruleBookInfo,
-          ruleToc: activeSource.ruleToc,
-          ruleContent: activeSource.ruleContent,
+          // Legado 格式字段
+          ...('ruleSearch' in activeSource && { ruleSearch: activeSource.ruleSearch }),
+          ...('ruleBookInfo' in activeSource && { ruleBookInfo: activeSource.ruleBookInfo }),
+          ...('ruleToc' in activeSource && { ruleToc: activeSource.ruleToc }),
+          ...('ruleContent' in activeSource && { ruleContent: activeSource.ruleContent }),
+          // 异次元格式字段
+          ...('ruleSearchUrl' in activeSource && { ruleSearchUrl: activeSource.ruleSearchUrl }),
+          ...('ruleSearchList' in activeSource && { ruleSearchList: activeSource.ruleSearchList }),
+          ...('ruleChapterList' in activeSource && { ruleChapterList: activeSource.ruleChapterList }),
+          ...('ruleBookContent' in activeSource && { ruleBookContent: activeSource.ruleBookContent }),
         }, null, 2) : '无';
 
         const trimmedResponse = smartTrimResponse(state.testResult.rawResponse, state.testMode);
@@ -470,7 +477,7 @@ export function AIChatPanel() {
           )}
         </Group>
         <Group gap={4}>
-          <ActionIcon variant="subtle" size="sm" onClick={() => setShowSettings(!showSettings)}>
+          <ActionIcon variant="subtle" size="sm" onClick={() => setShowSettings(!showSettings)} data-tour="ai-settings">
             <IconSettings size={16} />
           </ActionIcon>
           <ActionIcon variant="subtle" size="sm" onClick={handleClear}>

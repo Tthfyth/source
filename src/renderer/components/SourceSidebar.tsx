@@ -26,6 +26,7 @@ import {
   IconCircleCheck,
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
+import { detectSourceFormat, SourceFormat, getSourceFormatLabel } from '../types';
 
 export function SourceSidebar() {
   const {
@@ -35,6 +36,8 @@ export function SourceSidebar() {
     createSource,
     importSources,
     deleteSource,
+    saveToFile,
+    loadedFilePath,
   } = useBookSourceStore();
 
   const { colorScheme } = useMantineColorScheme();
@@ -125,6 +128,34 @@ export function SourceSidebar() {
     }
   };
 
+  // 全部保存
+  const handleSaveAll = async () => {
+    if (sources.length === 0) {
+      notifications.show({
+        message: '没有书源需要保存',
+        color: 'blue',
+      });
+      return;
+    }
+
+    const result = await saveToFile();
+    if (result) {
+      notifications.show({
+        title: '保存成功',
+        message: loadedFilePath 
+          ? `已保存 ${sources.length} 个书源到: ${loadedFilePath}`
+          : `已保存 ${sources.length} 个书源`,
+        color: 'teal',
+      });
+    } else {
+      notifications.show({
+        title: '保存失败',
+        message: '请检查文件权限或选择保存位置',
+        color: 'red',
+      });
+    }
+  };
+
   return (
     <Box
       h="100%"
@@ -191,14 +222,37 @@ export function SourceSidebar() {
                   })}
                   onClick={() => selectSource(source.bookSourceUrl)}
                 >
+                  {/* 源格式标签 */}
+                  {(() => {
+                    const format = detectSourceFormat(source);
+                    const isYiciyuan = format === SourceFormat.Yiciyuan;
+                    return (
+                      <Badge
+                        size="xs"
+                        variant="light"
+                        color={isYiciyuan ? 'grape' : 'blue'}
+                        style={{ flexShrink: 0 }}
+                      >
+                        {isYiciyuan ? '异次元' : 'Legado'}
+                      </Badge>
+                    );
+                  })()}
+                  {/* 启用状态指示器 */}
                   <Box
                     w={8}
                     h={8}
-                    style={(theme) => ({
-                      flexShrink: 0,
-                      borderRadius: '50%',
-                      backgroundColor: source.enabled ? theme.colors.green[6] : theme.colors.red[6],
-                    })}
+                    style={(theme) => {
+                      // 根据源格式检查启用状态
+                      const format = detectSourceFormat(source);
+                      const isEnabled = format === SourceFormat.Yiciyuan
+                        ? (source as any).enable
+                        : (source as any).enabled;
+                      return {
+                        flexShrink: 0,
+                        borderRadius: '50%',
+                        backgroundColor: isEnabled ? theme.colors.green[6] : theme.colors.red[6],
+                      };
+                    }}
                   />
                   <Text
                     size="sm"
@@ -278,7 +332,7 @@ export function SourceSidebar() {
             </ActionIcon>
           </Tooltip>
         </Group>
-        <Button size="xs" leftSection={<IconDeviceFloppy size={14} />}>
+        <Button size="xs" leftSection={<IconDeviceFloppy size={14} />} onClick={handleSaveAll}>
           全部保存
         </Button>
       </Group>

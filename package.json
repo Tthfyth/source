@@ -1,6 +1,6 @@
 {
-  "name": "electron-react-boilerplate",
-  "description": "A foundation for scalable desktop apps",
+  "name": "source-debug",
+  "description": "书源调试器 - Legado/异次元书源调试工具",
   "keywords": [
     "electron",
     "boilerplate",
@@ -108,6 +108,7 @@
     "@mantine/hooks": "^8.3.9",
     "@mantine/notifications": "^8.3.9",
     "@monaco-editor/react": "^4.7.0",
+    "@reactour/tour": "^3.8.0",
     "@tabler/icons-react": "^3.35.0",
     "@xmldom/xmldom": "^0.8.11",
     "allotment": "^1.20.4",

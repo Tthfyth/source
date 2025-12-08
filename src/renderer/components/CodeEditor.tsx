@@ -17,6 +17,7 @@ import {
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import { SourceFormEditor } from './SourceFormEditor';
+import { SourceVisualizer } from './SourceVisualizer';
 import {
   basicFields,
   searchRuleFields,
@@ -199,26 +200,29 @@ export function CodeEditor() {
     <Box h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       {/* 标签页头部 */}
       <Group
-        px="sm"
-        py="xs"
-        justify="space-between"
+        px="md"
+        py="sm"
+        gap="md"
+        wrap="nowrap"
         style={(theme) => ({
           borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`,
           backgroundColor: colorScheme === 'dark' ? theme.colors.dark[7] : theme.white,
+          width: '100%',
         })}
       >
         <SegmentedControl
           value={editorViewMode}
           onChange={(v) => setEditorViewMode(v as 'text' | 'visual' | 'table')}
-          size="xs"
+          size="sm"
+          style={{ flex: '0 0 80%' }}
           data={[
-            { label: <Group gap={4}><IconCode size={14} />文本视图</Group>, value: 'text' },
-            { label: <Group gap={4}><IconTable size={14} />表格视图</Group>, value: 'table' },
-            { label: <Group gap={4}><IconGitBranch size={14} />可视化</Group>, value: 'visual' },
+            { label: <Group gap={6}><IconCode size={16} /><span>文本</span></Group>, value: 'text' },
+            { label: <Group gap={6}><IconTable size={16} /><span>表格</span></Group>, value: 'table' },
+            { label: <Group gap={6}><IconGitBranch size={16} /><span>可视化</span></Group>, value: 'visual' },
           ]}
         />
 
-        <Button variant="subtle" size="xs" leftSection={<IconSparkles size={14} />} onClick={formatCode}>
+        <Button variant="subtle" size="sm" leftSection={<IconSparkles size={16} />} onClick={formatCode} style={{ flex: '0 0 10%', minWidth: 'fit-content' }}>
           格式化
         </Button>
       </Group>
@@ -263,11 +267,15 @@ export function CodeEditor() {
           </Box>
         )}
 
-        {editorViewMode === 'table' && <SourceFormEditor />}
+        {editorViewMode === 'table' && (
+          <Box style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+            <SourceFormEditor />
+          </Box>
+        )}
 
         {editorViewMode === 'visual' && (
-          <Box h="100%" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Text c="dimmed">可视化视图开发中...</Text>
+          <Box style={{ position: 'absolute', inset: 0, overflow: 'auto' }}>
+            <SourceVisualizer />
           </Box>
         )}
 

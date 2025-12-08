@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Group,
   ActionIcon,
@@ -5,6 +6,7 @@ import {
   Text,
   Tooltip,
   Divider,
+  Menu,
   useMantineColorScheme,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
@@ -12,7 +14,7 @@ import {
   IconPlus,
   IconFolderOpen,
   IconDeviceFloppy,
-  IconRefresh,
+  IconTransform,
   IconSettings,
   IconSparkles,
   IconLayoutSidebar,
@@ -21,8 +23,13 @@ import {
   IconSun,
   IconMoon,
   IconTrash,
+  IconChevronDown,
+  IconHelp,
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
+import { SourceFormat, detectSourceFormat, getSourceFormatLabel } from '../types';
+import { useAppTour } from './AppTour';
+import { convertSource } from '../utils/sourceConverter';
 
 interface TopToolbarProps {
   isLeftCollapsed: boolean;
@@ -58,14 +65,27 @@ export function TopToolbar({
   } = useBookSourceStore();
 
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
+  const { resetTour } = useAppTour();
 
   const activeSource = sources.find(
     (s) => s.bookSourceUrl === activeSourceId
   );
 
   // 新建书源
-  const handleCreate = () => {
-    createSource();
+  const handleCreateLegado = () => {
+    createSource(SourceFormat.Legado);
+    notifications.show({
+      message: '已创建 Legado 书源',
+      color: 'blue',
+    });
+  };
+
+  const handleCreateYiciyuan = () => {
+    createSource(SourceFormat.Yiciyuan);
+    notifications.show({
+      message: '已创建异次元图源',
+      color: 'grape',
+    });
   };
 
   // 导入书源
@@ -181,6 +201,44 @@ export function TopToolbar({
     }
   };
 
+  // 图源转换（仅支持图片类型）
+  const handleConvertSource = () => {
+    if (!activeSource) {
+      notifications.show({
+        message: '请先选择一个书源',
+        color: 'yellow',
+      });
+      return;
+    }
+
+    const convertResult = convertSource(activeSource);
+    
+    // 检查转换是否成功
+    if (!convertResult.success) {
+      notifications.show({
+        title: '无法转换',
+        message: convertResult.error || '转换失败',
+        color: 'red',
+      });
+      return;
+    }
+    
+    // 更新源代码并保存到列表
+    const newCode = JSON.stringify(convertResult.result, null, 2);
+    const store = useBookSourceStore.getState();
+    store.updateSourceCode(newCode);
+    store.saveCurrentSource(); // 保存到列表，触发类型更新
+    
+    const fromLabel = convertResult.fromFormat === SourceFormat.Yiciyuan ? '异次元' : 'Legado';
+    const toLabel = convertResult.toFormat === SourceFormat.Yiciyuan ? '异次元' : 'Legado';
+    
+    notifications.show({
+      title: '转换成功',
+      message: `已将 ${fromLabel} 图源转换为 ${toLabel} 格式`,
+      color: 'teal',
+    });
+  };
+
   return (
     <Group
       h={48}
@@ -208,11 +266,34 @@ export function TopToolbar({
         <Divider orientation="vertical" mx={4} />
 
         <Group gap={4}>
-          <Tooltip label="新建书源" position="bottom">
-            <ActionIcon variant="subtle" size="lg" onClick={handleCreate}>
-              <IconPlus size={18} />
-            </ActionIcon>
-          </Tooltip>
+          {/* 新建书源下拉菜单 */}
+          <Menu position="bottom-start" withinPortal>
+            <Menu.Target>
+              <Tooltip label="新建书源" position="bottom">
+                <ActionIcon variant="subtle" size="lg">
+                  <Group gap={2}>
+                    <IconPlus size={18} />
+                    <IconChevronDown size={12} />
+                  </Group>
+                </ActionIcon>
+              </Tooltip>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>选择书源格式</Menu.Label>
+              <Menu.Item onClick={handleCreateLegado}>
+                <Group gap="xs">
+                  <Text size="sm" c="blue">Legado 书源</Text>
+                  <Text size="xs" c="dimmed">（文本/图片/音频）</Text>
+                </Group>
+              </Menu.Item>
+              <Menu.Item onClick={handleCreateYiciyuan}>
+                <Group gap="xs">
+                  <Text size="sm" c="grape">异次元图源</Text>
+                  <Text size="xs" c="dimmed">（漫画专用）</Text>
+                </Group>
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
 
           <Tooltip label="导入书源" position="bottom">
             <ActionIcon variant="subtle" size="lg" onClick={handleImport}>
@@ -238,6 +319,7 @@ export function TopToolbar({
               size="lg"
               onClick={handleSave}
               disabled={!isModified}
+              data-tour="save-btn"
             >
               <IconDeviceFloppy size={18} />
             </ActionIcon>
@@ -246,19 +328,35 @@ export function TopToolbar({
 
         <Divider orientation="vertical" mx={4} />
 
-        <Tooltip label="测试所有书源" position="bottom">
-          <ActionIcon variant="subtle" size="lg">
-            <IconRefresh size={18} />
+        <Tooltip label="图源转换 (异次元 ↔ Legado)" position="bottom">
+          <ActionIcon 
+            variant="subtle" 
+            size="lg" 
+            onClick={handleConvertSource}
+            disabled={!activeSource}
+            data-tour="convert-btn"
+          >
+            <IconTransform size={18} />
           </ActionIcon>
         </Tooltip>
       </Group>
 
       {/* 中间标题 */}
       <Group gap="xs">
-        <Text fw={600} size="sm">Legado 书源调试器</Text>
+        <Text fw={600} size="sm">书源调试器</Text>
         {activeSource && (
           <>
             <Text c="dimmed" size="sm">-</Text>
+            {/* 显示源格式标签 */}
+            {(() => {
+              const format = detectSourceFormat(activeSource);
+              const isYiciyuan = format === SourceFormat.Yiciyuan;
+              return (
+                <Text size="sm" c={isYiciyuan ? 'grape' : 'blue'} fw={500}>
+                  [{isYiciyuan ? '异次元' : 'Legado'}]
+                </Text>
+              );
+            })()}
             <Text c="dimmed" size="sm">{activeSource.bookSourceName}</Text>
             {isModified && (
               <Text c="teal" size="sm">●</Text>
@@ -275,6 +373,7 @@ export function TopToolbar({
             size="xs"
             leftSection={<IconSparkles size={16} />}
             onClick={onToggleAI}
+            data-tour="ai-toggle"
           >
             AI识别
           </Button>
@@ -305,6 +404,12 @@ export function TopToolbar({
         <Tooltip label={colorScheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'} position="bottom">
           <ActionIcon variant="subtle" size="lg" onClick={() => toggleColorScheme()}>
             {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+          </ActionIcon>
+        </Tooltip>
+
+        <Tooltip label="使用帮助" position="bottom">
+          <ActionIcon variant="subtle" size="lg" onClick={resetTour}>
+            <IconHelp size={18} />
           </ActionIcon>
         </Tooltip>
 

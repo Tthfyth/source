@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type {
   BookSource,
   DebugLog,
@@ -7,8 +8,14 @@ import type {
   RequestHeader,
   LogCategory,
   ThemeMode,
+  YiciyuanSource,
+  AnySource,
 } from '../types';
-import { BookSourceType } from '../types';
+import { BookSourceType, SourceFormat, detectSourceFormat, getSourceFormatLabel } from '../types';
+import { createDefaultYiciyuanSource } from '../lib/yiciyuanSourceEditConfig';
+
+// 本地存储 key
+const STORAGE_KEY = 'book-source-store';
 
 // 生成唯一ID（用于日志等）
 const generateId = () => Math.random().toString(36).substring(2, 15);
@@ -94,8 +101,8 @@ declare global {
 }
 
 interface BookSourceState {
-  // 书源列表
-  sources: BookSource[];
+  // 书源列表（支持 Legado 和 异次元 两种格式）
+  sources: AnySource[];
   // 当前选中的书源ID
   activeSourceId: string | null;
   // 当前编辑的代码
@@ -118,6 +125,10 @@ interface BookSourceState {
   isLoading: boolean;
   // 测试结果
   testResult: TestResult | null;
+  // 章节列表（用于正文测试时切换章节）
+  chapterList: Array<{ name: string; url: string }>;
+  // 当前章节索引
+  currentChapterIndex: number;
   // 请求头配置
   requestHeaders: RequestHeader[];
   // 编辑器视图模式
@@ -129,7 +140,7 @@ interface BookSourceState {
 
   // Actions
   selectSource: (url: string) => void;
-  createSource: () => BookSource;
+  createSource: (format?: SourceFormat) => AnySource;
   updateSourceCode: (code: string) => void;
   saveCurrentSource: () => boolean;
   saveToFile: () => Promise<boolean>;
@@ -155,6 +166,10 @@ interface BookSourceState {
     field: 'key' | 'value',
     value: string
   ) => void;
+  // 获取当前源的格式
+  getCurrentSourceFormat: () => SourceFormat;
+  // 获取指定源的格式
+  getSourceFormat: (url: string) => SourceFormat;
 }
 
 // 格式化解析数据用于显示
@@ -202,7 +217,9 @@ function formatParsedData(
   return [];
 }
 
-export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
+export const useBookSourceStore = create<BookSourceState>()(
+  persist(
+    (set, get) => ({
   sources: [],
   activeSourceId: null,
   sourceCode: '',
@@ -215,6 +232,8 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
   testHistory: [],
   isLoading: false,
   testResult: null,
+  chapterList: [],
+  currentChapterIndex: -1,
   requestHeaders: [
     {
       key: 'User-Agent',
@@ -224,7 +243,7 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
   ],
   editorViewMode: 'text',
   themeMode: 'light',
-  aiAnalysisEnabled: false,
+  aiAnalysisEnabled: true,
 
   selectSource: (url: string) => {
     const source = get().sources.find((s) => s.bookSourceUrl === url);
@@ -235,8 +254,10 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
     });
   },
 
-  createSource: () => {
-    const newSource = createDefaultSource();
+  createSource: (format: SourceFormat = SourceFormat.Legado) => {
+    const newSource = format === SourceFormat.Yiciyuan 
+      ? createDefaultYiciyuanSource() as YiciyuanSource
+      : createDefaultSource();
     set((state) => ({
       sources: [...state.sources, newSource],
       activeSourceId: newSource.bookSourceUrl,
@@ -450,7 +471,7 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
         throw new Error('调试API不可用，请在Electron环境中运行');
       }
 
-      let currentSource: BookSource;
+      let currentSource: AnySource;
       try {
         currentSource = JSON.parse(state.sourceCode);
       } catch {
@@ -519,6 +540,26 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
           testResultData.imageUrls = result.imageUrls;
         }
 
+        // 目录测试成功后保存章节列表
+        if (state.testMode === 'toc' && Array.isArray(result.parsedItems)) {
+          const chapters = result.parsedItems
+            .map((item: any) => ({
+              name: item.name || item.chapterName || item.title || '',
+              url: item.url || item.chapterUrl || item.href || '',
+            }))
+            .filter((ch: { name: string; url: string }) => ch.name && ch.url);
+          set({ chapterList: chapters, currentChapterIndex: -1 });
+        }
+
+        // 正文测试时更新当前章节索引
+        if (state.testMode === 'content') {
+          const chapterList = get().chapterList;
+          const currentIndex = chapterList.findIndex(ch => ch.url === state.testInput);
+          if (currentIndex !== -1) {
+            set({ currentChapterIndex: currentIndex });
+          }
+        }
+
         set({ testResult: testResultData });
 
         const itemCount = result.imageUrls?.length || 
@@ -560,9 +601,15 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
 
   toggleSourceEnabled: (url: string) => {
     set((state) => ({
-      sources: state.sources.map((s) =>
-        s.bookSourceUrl === url ? { ...s, enabled: !s.enabled } : s
-      ),
+      sources: state.sources.map((s) => {
+        if (s.bookSourceUrl !== url) return s;
+        // 根据源格式切换不同的启用字段
+        const format = detectSourceFormat(s);
+        if (format === SourceFormat.Yiciyuan) {
+          return { ...s, enable: !(s as YiciyuanSource).enable };
+        }
+        return { ...s, enabled: !(s as BookSource).enabled };
+      }),
     }));
   },
 
@@ -630,17 +677,45 @@ export const useBookSourceStore = create<BookSourceState>()((set, get) => ({
       ),
     }));
   },
-}));
+
+  // 获取当前源的格式
+  getCurrentSourceFormat: () => {
+    const state = get();
+    if (!state.activeSourceId) return SourceFormat.Legado;
+    const source = state.sources.find(s => s.bookSourceUrl === state.activeSourceId);
+    return source ? detectSourceFormat(source) : SourceFormat.Legado;
+  },
+
+  // 获取指定源的格式
+  getSourceFormat: (url: string) => {
+    const source = get().sources.find(s => s.bookSourceUrl === url);
+    return source ? detectSourceFormat(source) : SourceFormat.Legado;
+  },
+}),
+    {
+      name: STORAGE_KEY,
+      // 只持久化需要保存的字段
+      partialize: (state) => ({
+        sources: state.sources,
+        testHistory: state.testHistory,
+        requestHeaders: state.requestHeaders,
+        editorViewMode: state.editorViewMode,
+        themeMode: state.themeMode,
+        aiAnalysisEnabled: state.aiAnalysisEnabled,
+      }),
+    }
+  )
+);
 
 // 声明 window.debugApi 类型
 declare global {
   interface Window {
     debugApi?: {
-      search: (source: BookSource, keyword: string) => Promise<unknown>;
-      explore: (source: BookSource, exploreUrl: string) => Promise<unknown>;
-      bookInfo: (source: BookSource, bookUrl: string) => Promise<unknown>;
-      toc: (source: BookSource, tocUrl: string) => Promise<unknown>;
-      content: (source: BookSource, contentUrl: string) => Promise<unknown>;
+      search: (source: AnySource, keyword: string) => Promise<unknown>;
+      explore: (source: AnySource, exploreUrl: string) => Promise<unknown>;
+      bookInfo: (source: AnySource, bookUrl: string) => Promise<unknown>;
+      toc: (source: AnySource, tocUrl: string) => Promise<unknown>;
+      content: (source: AnySource, contentUrl: string) => Promise<unknown>;
     };
   }
 }

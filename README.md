@@ -1,159 +1,200 @@
-<img src=".erb/img/erb-banner.svg" width="100%" />
+# 书源调试器 (Legado Source Debugger)
 
-<br>
+一个用于调试和管理 Legado / 异次元 书源的桌面应用程序。
 
-<p>
-  Electron React Boilerplate uses <a href="https://electron.atom.io/">Electron</a>, <a href="https://facebook.github.io/react/">React</a>, <a href="https://github.com/reactjs/react-router">React Router</a>, <a href="https://webpack.js.org/">Webpack</a> and <a href="https://www.npmjs.com/package/react-refresh">React Fast Refresh</a>.
-</p>
+## 功能特性
 
-<br>
+- **多格式支持**：同时支持 Legado 书源和异次元图源
+- **格式互转**：支持 Legado ↔ 异次元格式一键转换，转换后可在两种阅读器中使用
+- **可视化编辑**：提供文本、表格、可视化三种编辑模式
+- **规则调试**：支持搜索、发现、详情、目录、正文的完整调试流程
+- **AI 辅助**：集成 AI 助手，帮助分析和修复书源规则
+- **实时预览**：调试结果实时可视化展示
 
-<div align="center">
-
-[![Build Status][github-actions-status]][github-actions-url]
-[![Github Tag][github-tag-image]][github-tag-url]
-[![Discord](https://badgen.net/badge/icon/discord?icon=discord&label)](https://discord.gg/Fjy3vfgy5q)
-
-[![OpenCollective](https://opencollective.com/electron-react-boilerplate-594/backers/badge.svg)](#backers)
-[![OpenCollective](https://opencollective.com/electron-react-boilerplate-594/sponsors/badge.svg)](#sponsors)
-[![StackOverflow][stackoverflow-img]][stackoverflow-url]
-
-</div>
-
-## Install
-
-Clone the repo and install dependencies:
+## 安装
 
 ```bash
-git clone --depth 1 --branch main https://github.com/electron-react-boilerplate/electron-react-boilerplate.git your-project-name
-cd your-project-name
-npm install
+# 克隆项目
+git clone <repository-url>
+cd source
+
+# 安装依赖
+pnpm install
 ```
 
-**Having issues installing? See our [debugging guide](https://github.com/electron-react-boilerplate/electron-react-boilerplate/issues/400)**
-
-## Starting Development
-
-Start the app in the `dev` environment:
+## 开发
 
 ```bash
-npm start
+# 启动开发环境
+pnpm start
 ```
 
-## Packaging for Production
-
-To package apps for the local platform:
+## 打包
 
 ```bash
-npm run package
+# 打包应用
+pnpm run package
 ```
 
-## Docs
+## 使用指南
 
-See our [docs and guides here](https://electron-react-boilerplate.js.org/docs/installation)
+### 1. 书源管理
 
-## Community
+**导入书源**
+- 点击左侧边栏底部的 📂 按钮导入 JSON 格式的书源文件
+- 支持单个书源或书源数组
 
-Join our Discord: https://discord.gg/Fjy3vfgy5q
+**新建书源**
+- 点击左侧边栏底部的 ➕ 按钮创建新书源
+- 支持创建 Legado 书源或异次元图源
 
-## Sponsors
+**保存书源**
+- `Ctrl+S`：保存当前编辑的书源
+- 点击「全部保存」按钮：保存所有书源到文件
 
-<a href="https://palette.dev">
-  <img src=".erb/img/palette-sponsor-banner.svg" width="100%" />
-</a>
+### 2. 图源格式转换
 
-## Donations
+支持 Legado 书源和异次元图源之间的双向转换：
 
-**Donations will ensure the following:**
+**使用方法**
+- 点击工具栏的 🔄 转换按钮
+- 自动检测当前格式并转换为另一种格式
 
-- 🔨 Long term maintenance of the project
-- 🛣 Progress on the [roadmap](https://electron-react-boilerplate.js.org/docs/roadmap)
-- 🐛 Quick responses to bug reports and help requests
+**转换规则**
+| Legado 字段 | 异次元字段 |
+|------------|-----------|
+| `searchUrl` | `ruleSearchUrl` |
+| `ruleSearch.bookList` | `ruleSearchList` |
+| `ruleSearch.name` | `ruleSearchName` |
+| `ruleSearch.bookUrl` | `ruleSearchNoteUrl` |
+| `ruleBookInfo.name` | `ruleBookInfoName` |
+| `ruleToc.chapterList` | `ruleChapterList` |
+| `ruleContent.content` | `ruleContentUrlContent` |
 
-## Backers
+**特性**
+- 转换是幂等的：多次转换结果一致
+- 保留 `@Header:{}` 后缀等特殊语法
+- 自动转换占位符：`{{key}}` ↔ `searchKey`
 
-Support us with a monthly donation and help us continue our activities. [[Become a backer](https://opencollective.com/electron-react-boilerplate-594#backer)]
+### 3. 编辑模式
 
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/0/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/0/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/1/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/1/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/2/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/2/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/3/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/3/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/4/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/4/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/5/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/5/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/6/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/6/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/7/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/7/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/8/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/8/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/9/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/9/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/10/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/10/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/11/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/11/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/12/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/12/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/13/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/13/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/14/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/14/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/15/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/15/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/16/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/16/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/17/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/17/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/18/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/18/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/19/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/19/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/20/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/20/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/21/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/21/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/22/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/22/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/23/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/23/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/24/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/24/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/25/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/25/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/26/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/26/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/27/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/27/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/28/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/28/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/backer/29/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/backer/29/avatar.svg"></a>
+**文本视图**
+- 直接编辑书源 JSON 代码
+- 支持 `Ctrl+B` 格式化代码
+- 悬停字段名显示帮助文档
 
-## Sponsors
+**表格视图**
+- 表单化编辑书源字段
+- 按分类组织：基本信息、搜索规则、发现规则、详情规则、目录规则、正文规则
 
-Become a sponsor and get your logo on our README on Github with a link to your site. [[Become a sponsor](https://opencollective.com/electron-react-boilerplate-594-594#sponsor)]
+**可视化视图**
+- 流程图展示书源解析流程
+- 规则树展示所有配置项及状态
+- 快速查看规则类型（JS/JSON/XPath/CSS）
 
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/0/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/0/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/1/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/1/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/2/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/2/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/3/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/3/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/4/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/4/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/5/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/5/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/6/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/6/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/7/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/7/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/8/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/8/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/9/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/9/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/10/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/10/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/11/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/11/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/12/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/12/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/13/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/13/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/14/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/14/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/15/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/15/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/16/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/16/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/17/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/17/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/18/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/18/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/19/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/19/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/20/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/20/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/21/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/21/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/22/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/22/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/23/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/23/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/24/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/24/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/25/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/25/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/26/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/26/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/27/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/27/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/28/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/28/avatar.svg"></a>
-<a href="https://opencollective.com/electron-react-boilerplate-594/sponsor/29/website" target="_blank"><img src="https://opencollective.com/electron-react-boilerplate-594/sponsor/29/avatar.svg"></a>
+### 4. 规则测试器
 
-## Maintainers
+**测试模式**
+- **搜索**：输入关键词测试搜索功能
+- **发现**：选择发现分类测试发现功能
+- **详情**：输入书籍 URL 测试详情解析
+- **目录**：输入目录 URL 测试章节列表解析
+- **正文**：输入章节 URL 测试正文内容解析
 
-- [Amila Welihinda](https://github.com/amilajack)
-- [John Tran](https://github.com/jooohhn)
-- [C. T. Lin](https://github.com/chentsulin)
-- [Jhen-Jie Hong](https://github.com/jhen0409)
+**测试流程**
+1. 选择测试模式
+2. 输入测试参数（关键词或 URL）
+3. 点击「测试」按钮
+4. 查看结果：可视化 / 解析结果 / 原始响应
+
+**快捷操作**
+- 搜索结果点击书籍 → 自动跳转详情测试
+- 详情页点击「查看目录」→ 自动跳转目录测试
+- 目录点击章节 → 自动跳转正文测试
+
+### 5. 调试控制台
+
+- 查看请求日志、解析日志、错误信息
+- 支持按类别过滤日志
+- 支持清空日志
+
+### 6. AI 助手
+
+- 开启「AI」开关后，测试结果会附加到 AI 对话
+- AI 可以帮助分析规则问题并提供修复建议
+- 支持配置多个 AI 服务商（GitHub Copilot、DeepSeek、Kimi 等）
+- 输入网址可自动分析页面结构生成规则
+
+## 支持的规则语法
+
+### Legado 书源
+
+| 规则类型 | 语法示例 |
+|---------|---------|
+| JSONPath | `$.data.list[*]` |
+| CSS 选择器 | `div.book-item` |
+| XPath | `//div[@class='item']` |
+| 正则表达式 | `:regex:pattern` |
+| JavaScript | `@js:code` 或 `<js>code</js>` |
+| 模板变量 | `{{key}}`, `{{page}}` |
+
+### 异次元图源
+
+| 规则类型 | 语法示例 |
+|---------|---------|
+| JSONPath | `$.data[*]` |
+| CSS/JSoup | `div.item@text` |
+| 正则 | `regex:pattern` |
+| JavaScript | `js:code` |
+
+## 项目结构
+
+```
+src/
+├── main/                 # Electron 主进程
+│   ├── debug/           # 书源调试核心
+│   │   ├── source-debugger.ts    # Legado 调试器
+│   │   ├── yiciyuan-debugger.ts  # 异次元调试器
+│   │   ├── rule-parser.ts        # 规则解析器
+│   │   ├── analyze-url.ts        # URL 分析器
+│   │   ├── http-client.ts        # HTTP 请求客户端
+│   │   ├── cache-manager.ts      # 缓存管理
+│   │   └── cookie-manager.ts     # Cookie 管理
+│   ├── ai/              # AI 服务集成
+│   └── services/        # 服务层
+│       └── puppeteer-service.ts  # Puppeteer 浏览器服务
+├── renderer/            # React 渲染进程
+│   ├── components/      # UI 组件
+│   ├── stores/          # 状态管理
+│   ├── utils/           # 工具函数
+│   │   └── sourceConverter.ts    # 图源格式转换器
+│   └── types/           # 类型定义
+```
+
+## 快捷键
+
+| 快捷键 | 功能 |
+|-------|------|
+| `Ctrl+S` | 保存当前书源 |
+| `Ctrl+B` | 格式化 JSON |
+| `Ctrl+O` | 打开文件 |
+| `Enter` | 执行测试（在输入框中） |
+
+## 技术栈
+
+- **框架**：Electron + React + TypeScript
+- **UI 库**：Mantine UI
+- **状态管理**：Zustand
+- **解析库**：Cheerio, JSONPath-Plus
+
+## 开源声明
+
+本项目为**完全开源项目**，遵循 MIT 许可证。
+
+- 源代码完全公开，可自由查看、修改和分发
+- 欢迎提交 Issue 和 Pull Request
+- 可用于个人学习、商业项目等任何用途
 
 ## License
 
-MIT © [Electron React Boilerplate](https://github.com/electron-react-boilerplate)
-
-[github-actions-status]: https://github.com/electron-react-boilerplate/electron-react-boilerplate/workflows/Test/badge.svg
-[github-actions-url]: https://github.com/electron-react-boilerplate/electron-react-boilerplate/actions
-[github-tag-image]: https://img.shields.io/github/tag/electron-react-boilerplate/electron-react-boilerplate.svg?label=version
-[github-tag-url]: https://github.com/electron-react-boilerplate/electron-react-boilerplate/releases/latest
-[stackoverflow-img]: https://img.shields.io/badge/stackoverflow-electron_react_boilerplate-blue.svg
-[stackoverflow-url]: https://stackoverflow.com/questions/tagged/electron-react-boilerplate
+MIT

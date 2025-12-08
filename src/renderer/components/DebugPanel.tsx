@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Box,
   Group,
@@ -18,6 +18,7 @@ import {
   Loader,
   SegmentedControl,
   Tooltip,
+  Modal,
   useMantineColorScheme,
 } from '@mantine/core';
 import {
@@ -43,6 +44,12 @@ import {
   IconBolt,
   IconInfoCircle,
   IconAlertCircle,
+  IconChevronLeft,
+  IconX,
+  IconLayoutRows,
+  IconLayoutColumns,
+  IconPlayerSkipBack,
+  IconPlayerSkipForward,
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import type { BookItem, ChapterItem, TestMode } from '../types';
@@ -72,6 +79,8 @@ export function DebugPanel() {
     updateRequestHeader,
     aiAnalysisEnabled,
     setAiAnalysisEnabled,
+    chapterList,
+    currentChapterIndex,
   } = useBookSourceStore();
 
   const { colorScheme } = useMantineColorScheme();
@@ -79,6 +88,11 @@ export function DebugPanel() {
   const [showHistory, setShowHistory] = useState(false);
   const [showRequestInfo, setShowRequestInfo] = useState(false);
   const [activeResultTab, setActiveResultTab] = useState<string | null>('visual');
+  
+  // 图片查看器状态
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal'); // 横向翻页 / 纵向条漫
 
   // 可视化数据
   const visualData = useMemo(() => {
@@ -159,11 +173,73 @@ export function DebugPanel() {
     return { books: [], chapters: [], content: '', imageUrls: [], bookDetail: null };
   }, [testResult, testMode]);
 
+  // 图片查看器键盘快捷键
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!imageViewerOpen) return;
+    
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      setCurrentImageIndex(prev => Math.max(0, prev - 1));
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      setCurrentImageIndex(prev => Math.min((visualData.imageUrls?.length || 1) - 1, prev + 1));
+    } else if (e.key === 'Escape') {
+      setImageViewerOpen(false);
+    }
+  }, [imageViewerOpen, visualData.imageUrls?.length]);
+
+  // 图片查看器鼠标滚轮（仅横向模式）
+  const handleWheel = useCallback((e: WheelEvent) => {
+    if (!imageViewerOpen || viewMode === 'vertical') return;
+    
+    e.preventDefault();
+    if (e.deltaY > 0) {
+      // 向下滚动 -> 下一张
+      setCurrentImageIndex(prev => Math.min((visualData.imageUrls?.length || 1) - 1, prev + 1));
+    } else if (e.deltaY < 0) {
+      // 向上滚动 -> 上一张
+      setCurrentImageIndex(prev => Math.max(0, prev - 1));
+    }
+  }, [imageViewerOpen, viewMode, visualData.imageUrls?.length]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  useEffect(() => {
+    if (imageViewerOpen && viewMode === 'horizontal') {
+      window.addEventListener('wheel', handleWheel, { passive: false });
+      return () => window.removeEventListener('wheel', handleWheel);
+    }
+  }, [imageViewerOpen, viewMode, handleWheel]);
+
   const handleTest = async () => {
     if (!testInput.trim()) {
       return;
     }
     await runTest();
+  };
+
+  // 上一章/下一章
+  const hasPrevChapter = currentChapterIndex > 0;
+  const hasNextChapter = currentChapterIndex >= 0 && currentChapterIndex < chapterList.length - 1;
+  const currentChapterName = currentChapterIndex >= 0 && currentChapterIndex < chapterList.length 
+    ? chapterList[currentChapterIndex].name 
+    : '';
+
+  const handlePrevChapter = async () => {
+    if (hasPrevChapter) {
+      const prevChapter = chapterList[currentChapterIndex - 1];
+      await runTestWithParams('content', prevChapter.url);
+      setCurrentImageIndex(0);
+    }
+  };
+
+  const handleNextChapter = async () => {
+    if (hasNextChapter) {
+      const nextChapter = chapterList[currentChapterIndex + 1];
+      await runTestWithParams('content', nextChapter.url);
+      setCurrentImageIndex(0);
+    }
   };
 
   const responseTimeText = testResult?.responseTime ? `${testResult.responseTime}ms` : '';
@@ -585,12 +661,48 @@ export function DebugPanel() {
                       <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
                         <IconPhoto size={16} />
                         <Text size="sm" fw={500}>图片内容 ({visualData.imageUrls.length}张)</Text>
+                        <Text size="xs" c="dimmed">点击图片放大查看</Text>
                       </Group>
                       <ScrollArea.Autosize mah={320}>
-                        <Box p="sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                        <Box p="sm" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                           {visualData.imageUrls.map((url, index) => (
-                            <Box key={index} style={{ aspectRatio: '3/4', borderRadius: 8, overflow: 'hidden', backgroundColor: 'var(--mantine-color-gray-2)' }}>
+                            <Box 
+                              key={index} 
+                              style={{ 
+                                aspectRatio: '3/4', 
+                                borderRadius: 8, 
+                                overflow: 'hidden', 
+                                backgroundColor: 'var(--mantine-color-gray-2)',
+                                cursor: 'pointer',
+                                transition: 'transform 0.2s, box-shadow 0.2s',
+                                position: 'relative',
+                              }}
+                              onClick={() => {
+                                setCurrentImageIndex(index);
+                                setImageViewerOpen(true);
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'scale(1.02)';
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'scale(1)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            >
                               <Image src={url} alt={`第${index + 1}页`} fit="contain" h="100%" />
+                              <Box 
+                                style={{ 
+                                  position: 'absolute', 
+                                  bottom: 4, 
+                                  right: 4, 
+                                  background: 'rgba(0,0,0,0.6)', 
+                                  borderRadius: 4, 
+                                  padding: '2px 6px' 
+                                }}
+                              >
+                                <Text size="xs" c="white">{index + 1}</Text>
+                              </Box>
                             </Box>
                           ))}
                         </Box>
@@ -646,6 +758,292 @@ export function DebugPanel() {
           </Box>
         </Stack>
       </ScrollArea>
+
+      {/* 图片查看器 Modal */}
+      <Modal
+        opened={imageViewerOpen}
+        onClose={() => setImageViewerOpen(false)}
+        size="xl"
+        fullScreen
+        padding={0}
+        withCloseButton={false}
+        styles={{
+          body: { 
+            height: '100%', 
+            display: 'flex', 
+            flexDirection: 'column',
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+          },
+          content: {
+            backgroundColor: 'transparent',
+          },
+        }}
+      >
+        {visualData.imageUrls && visualData.imageUrls.length > 0 && (
+          <Box h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+            {/* 顶部工具栏 */}
+            <Group 
+              justify="space-between" 
+              px="md" 
+              py="sm" 
+              style={{ 
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                backdropFilter: 'blur(10px)',
+              }}
+            >
+              <Group gap="md">
+                {/* 章节名称 */}
+                {currentChapterName && (
+                  <Text c="white" fw={500} size="sm" style={{ maxWidth: 300 }} lineClamp={1}>
+                    📖 {currentChapterName}
+                  </Text>
+                )}
+                
+                {currentChapterName && <Divider orientation="vertical" color="gray" />}
+                
+                <Text c="white" fw={500}>
+                  {viewMode === 'horizontal' ? `${currentImageIndex + 1} / ${visualData.imageUrls.length}` : `共 ${visualData.imageUrls.length} 页`}
+                </Text>
+                {/* 模式切换 */}
+                <Group gap={4}>
+                  <Tooltip label="翻页模式">
+                    <ActionIcon 
+                      variant={viewMode === 'horizontal' ? 'filled' : 'subtle'}
+                      color={viewMode === 'horizontal' ? 'teal' : 'gray'}
+                      size="md"
+                      onClick={() => setViewMode('horizontal')}
+                    >
+                      <IconLayoutColumns size={16} color="white" />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="条漫模式">
+                    <ActionIcon 
+                      variant={viewMode === 'vertical' ? 'filled' : 'subtle'}
+                      color={viewMode === 'vertical' ? 'teal' : 'gray'}
+                      size="md"
+                      onClick={() => setViewMode('vertical')}
+                    >
+                      <IconLayoutRows size={16} color="white" />
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
+              </Group>
+              <Group gap="xs">
+                <Text size="xs" c="dimmed">
+                  {viewMode === 'horizontal' ? '滚轮/方向键翻页' : '滚动浏览'}
+                </Text>
+                <ActionIcon 
+                  variant="subtle" 
+                  color="gray" 
+                  size="lg"
+                  onClick={() => setImageViewerOpen(false)}
+                >
+                  <IconX size={20} color="white" />
+                </ActionIcon>
+              </Group>
+            </Group>
+
+            {/* 横向翻页模式 */}
+            {viewMode === 'horizontal' && (
+              <Box 
+                style={{ 
+                  flex: 1, 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* 左侧控制区：上一章 + 上一页 */}
+                <Group 
+                  gap={8} 
+                  style={{ 
+                    position: 'absolute', 
+                    left: 16, 
+                    zIndex: 10,
+                  }}
+                >
+                  {/* 上一章 */}
+                  {hasPrevChapter && (
+                    <Tooltip label={`上一章: ${chapterList[currentChapterIndex - 1]?.name}`}>
+                      <ActionIcon
+                        variant="filled"
+                        size="xl"
+                        radius="xl"
+                        color="teal"
+                        onClick={handlePrevChapter}
+                        loading={isLoading}
+                      >
+                        <IconPlayerSkipBack size={22} color="white" />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                  {/* 上一页 */}
+                  <ActionIcon
+                    variant="subtle"
+                    size="xl"
+                    radius="xl"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+                    onClick={() => setCurrentImageIndex(prev => Math.max(0, prev - 1))}
+                    disabled={currentImageIndex === 0}
+                  >
+                    <IconChevronLeft size={28} color="white" />
+                  </ActionIcon>
+                </Group>
+
+                {/* 图片 */}
+                <Image
+                  src={visualData.imageUrls[currentImageIndex]}
+                  alt={`第${currentImageIndex + 1}页`}
+                  fit="contain"
+                  style={{ maxHeight: 'calc(100vh - 120px)', maxWidth: '100%' }}
+                />
+
+                {/* 右侧控制区：下一页 + 下一章 */}
+                <Group 
+                  gap={8} 
+                  style={{ 
+                    position: 'absolute', 
+                    right: 16, 
+                    zIndex: 10,
+                  }}
+                >
+                  {/* 下一页 */}
+                  <ActionIcon
+                    variant="subtle"
+                    size="xl"
+                    radius="xl"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+                    onClick={() => setCurrentImageIndex(prev => Math.min(visualData.imageUrls.length - 1, prev + 1))}
+                    disabled={currentImageIndex === visualData.imageUrls.length - 1}
+                  >
+                    <IconChevronRight size={28} color="white" />
+                  </ActionIcon>
+                  {/* 下一章 */}
+                  {hasNextChapter && (
+                    <Tooltip label={`下一章: ${chapterList[currentChapterIndex + 1]?.name}`}>
+                      <ActionIcon
+                        variant="filled"
+                        size="xl"
+                        radius="xl"
+                        color="teal"
+                        onClick={handleNextChapter}
+                        loading={isLoading}
+                      >
+                        <IconPlayerSkipForward size={22} color="white" />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
+                </Group>
+              </Box>
+            )}
+
+            {/* 纵向条漫模式 */}
+            {viewMode === 'vertical' && (
+              <Box style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                {/* 左侧上一章按钮 - 固定位置 */}
+                {hasPrevChapter && (
+                  <Tooltip label={`上一章: ${chapterList[currentChapterIndex - 1]?.name}`}>
+                    <ActionIcon
+                      variant="filled"
+                      size="xl"
+                      radius="xl"
+                      color="teal"
+                      onClick={handlePrevChapter}
+                      loading={isLoading}
+                      style={{
+                        position: 'absolute',
+                        left: 16,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        zIndex: 10,
+                      }}
+                    >
+                      <IconPlayerSkipBack size={22} color="white" />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+                
+                {/* 右侧下一章按钮 - 固定位置 */}
+                {hasNextChapter && (
+                  <Tooltip label={`下一章: ${chapterList[currentChapterIndex + 1]?.name}`}>
+                    <ActionIcon
+                      variant="filled"
+                      size="xl"
+                      radius="xl"
+                      color="teal"
+                      onClick={handleNextChapter}
+                      loading={isLoading}
+                      style={{
+                        position: 'absolute',
+                        right: 16,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        zIndex: 10,
+                      }}
+                    >
+                      <IconPlayerSkipForward size={22} color="white" />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+                
+                {/* 滚动区域 */}
+                <ScrollArea style={{ height: '100%' }} type="scroll">
+                  <Stack gap={0} align="center" py="md" px={60}>
+                    {visualData.imageUrls.map((url, index) => (
+                      <Box key={index} style={{ width: '100%', maxWidth: 800 }}>
+                        <Image
+                          src={url}
+                          alt={`第${index + 1}页`}
+                          fit="contain"
+                          w="100%"
+                        />
+                      </Box>
+                    ))}
+                  </Stack>
+                </ScrollArea>
+              </Box>
+            )}
+
+            {/* 底部缩略图导航（仅横向模式显示） */}
+            {viewMode === 'horizontal' && (
+            <Box 
+              py="sm" 
+              px="md"
+              style={{ 
+                backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                backdropFilter: 'blur(10px)',
+              }}
+            >
+              <ScrollArea>
+                <Group gap={8} wrap="nowrap">
+                  {visualData.imageUrls.map((url, index) => (
+                    <Box
+                      key={index}
+                      onClick={() => setCurrentImageIndex(index)}
+                      style={{
+                        width: 60,
+                        height: 80,
+                        borderRadius: 4,
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        border: index === currentImageIndex ? '2px solid var(--mantine-color-teal-5)' : '2px solid transparent',
+                        opacity: index === currentImageIndex ? 1 : 0.6,
+                        transition: 'all 0.2s',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Image src={url} alt={`缩略图${index + 1}`} fit="cover" h="100%" w="100%" />
+                    </Box>
+                  ))}
+                </Group>
+              </ScrollArea>
+            </Box>
+            )}
+          </Box>
+        )}
+      </Modal>
     </Box>
   );
 }

@@ -12,9 +12,31 @@ import { DOMParser } from '@xmldom/xmldom';
 import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
+import { CacheManager } from './cache-manager';
+import { CookieStore } from './cookie-manager';
 
 // HTTP 请求缓存 (用于 JS 中的同步请求模拟)
 const httpRequestCache = new Map<string, { body: string; headers: Record<string, string> }>();
+
+/**
+ * 修复 Legado 风格的 JSONPath
+ * Legado 使用 jayway jsonpath，支持以下特殊写法：
+ * 1. $.data.page[*]image -> $.data.page[*].image (省略点号)
+ * 2. $.data.[*] -> $.data[*] (多余的点号)
+ * 3. .chapters[*] -> $.chapters[*] (省略 $ 前缀)
+ */
+function fixLegadoJsonPath(path: string): string {
+  let fixed = path;
+  // 在 ] 后面如果紧跟字母或 $，自动添加点号
+  fixed = fixed.replace(/\]([a-zA-Z_$])/g, '].$1');
+  // 移除 .[ 中多余的点号，变成 [
+  fixed = fixed.replace(/\.\[/g, '[');
+  // 如果以 . 开头，添加 $ 前缀
+  if (fixed.startsWith('.')) {
+    fixed = '$' + fixed;
+  }
+  return fixed;
+}
 
 /**
  * 同步 HTTP 请求 (用于 JS 沙箱中)
@@ -543,9 +565,26 @@ function selectWithLegadoSyntax(
     return $el.find(`#${id}`);
   }
 
-  // tag.xxx 或 tag.xxx.index 格式
+  // tag.xxx 或 tag.xxx.index 或 tag.xxx!exclude 格式
   if (selector.startsWith('tag.')) {
-    const parts = selector.substring(4).split('.');
+    const afterTag = selector.substring(4);
+    
+    // 检查是否有排除语法 (tag.option!0 或 tag.option!0:2)
+    const excludeMatch = afterTag.match(/^([a-z0-9_-]+)!(.+)$/i);
+    if (excludeMatch) {
+      const tag = excludeMatch[1];
+      const excludeExpr = excludeMatch[2];
+      const allTags = $el.find(tag);
+      
+      // 解析排除的索引
+      const excludeIndices = excludeExpr.split(':').map((n) => {
+        const idx = parseInt(n);
+        return idx < 0 ? allTags.length + idx : idx;
+      });
+      return allTags.filter((i) => !excludeIndices.includes(i));
+    }
+    
+    const parts = afterTag.split('.');
     const tag = parts[0];
     let allTags = $el.find(tag);
 
@@ -814,6 +853,8 @@ function parseJson(json: string | object, rule: string): any[] {
     if (!path.startsWith('$')) {
       path = '$.' + path;
     }
+    // 修复 Legado 风格的 JSONPath
+    path = fixLegadoJsonPath(path);
 
     const results = JSONPath({ path, json: data, wrap: false });
     
@@ -1204,13 +1245,24 @@ function executeJs(
   }
 ): any {
   try {
-    // 转换 Rhino JS 语法为标准 ES6
-    const convertedCode = convertRhinoToES6(code);
-    
-    // 创建沙箱环境 - 完整实现 Legado java 对象
-    // 如果有 _jsResult，使用它作为 result（用于 bookUrl 等 JS 规则）
+    // 预处理 {{}} 变量 - 在 JS 执行前替换
+    let preprocessedCode = code;
     const jsResult = context.variables._jsResult || context.result;
     
+    // 替换 {{$.xxx}} 格式的 JSONPath 变量
+    preprocessedCode = preprocessedCode.replace(/\{\{\$\.([^}]+)\}\}/g, (_, path) => {
+      if (jsResult && typeof jsResult === 'object') {
+        // 简单的属性访问
+        const value = path.split('.').reduce((obj: any, key: string) => obj?.[key], jsResult);
+        return value !== undefined ? String(value) : '';
+      }
+      return '';
+    });
+    
+    // 转换 Rhino JS 语法为标准 ES6
+    const convertedCode = convertRhinoToES6(preprocessedCode);
+    
+    // 创建沙箱环境 - 完整实现 Legado java 对象
     const sandbox = {
       result: jsResult,
       src: context.src,
@@ -1521,13 +1573,27 @@ function executeJs(
         },
 
         // ==================== 时间格式化 ====================
-        timeFormat: (time: number) => {
-          return new Date(time).toISOString().replace('T', ' ').replace('Z', '');
+        timeFormat: (time: number | string) => {
+          try {
+            const timestamp = typeof time === 'string' ? parseInt(time) : time;
+            if (isNaN(timestamp) || !isFinite(timestamp)) return '';
+            const date = new Date(timestamp);
+            if (isNaN(date.getTime())) return '';
+            return date.toISOString().replace('T', ' ').replace('Z', '');
+          } catch {
+            return '';
+          }
         },
-        timeFormatUTC: (time: number, format: string, sh: number) => {
-          const date = new Date(time + sh * 3600 * 1000);
-          // 简单格式化，完整实现需要 moment.js 或 date-fns
-          return date.toISOString();
+        timeFormatUTC: (time: number | string, format: string, sh: number) => {
+          try {
+            const timestamp = typeof time === 'string' ? parseInt(time) : time;
+            if (isNaN(timestamp) || !isFinite(timestamp)) return '';
+            const date = new Date(timestamp + (sh || 0) * 3600 * 1000);
+            if (isNaN(date.getTime())) return '';
+            return date.toISOString();
+          } catch {
+            return '';
+          }
         },
 
         // ==================== 中文转换 ====================
@@ -1661,6 +1727,7 @@ function executeJs(
           const content = mContent || context.variables['_content'] || context.src;
           const baseUrl = context.variables['_baseUrl'] || context.baseUrl;
           
+          
           try {
             // 解析规则
             const parts = rule.split('@');
@@ -1674,11 +1741,16 @@ function executeJs(
                 try {
                   const json = JSON.parse(content);
                   const { JSONPath } = require('jsonpath-plus');
-                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  let jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  jsonRule = fixLegadoJsonPath(jsonRule);
                   const results = JSONPath({ path: jsonRule, json, wrap: true });
-                  return Array.isArray(results) ? results : [results];
-                } catch {
+                  const resultArray = Array.isArray(results) ? results : [results];
+                  // 添加 toArray 方法以兼容 Legado 的 Java List
+                  (resultArray as any).toArray = () => resultArray;
+                  return resultArray;
+                } catch (e) {
                   // 不是有效 JSON，继续用 HTML 解析
+                  // console.log('[getStringList] JSON parse error:', e);
                 }
               }
               $ = cheerio.load(content);
@@ -1711,7 +1783,10 @@ function executeJs(
               if (value) results.push(value);
             });
             
-            return results.length > 0 ? results : null;
+            // 添加 toArray 方法以兼容 Legado 的 Java List
+            const resultWithToArray = results as any;
+            resultWithToArray.toArray = () => results;
+            return results.length > 0 ? resultWithToArray : null;
           } catch {
             return null;
           }
@@ -1737,7 +1812,8 @@ function executeJs(
                 try {
                   const json = JSON.parse(content);
                   const { JSONPath } = require('jsonpath-plus');
-                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  let jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  jsonRule = fixLegadoJsonPath(jsonRule);
                   const results = JSONPath({ path: jsonRule, json, wrap: false });
                   return Array.isArray(results) ? results[0]?.toString() || '' : results?.toString() || '';
                 } catch {
@@ -1783,7 +1859,8 @@ function executeJs(
           }
         },
         
-        // 获取元素列表
+        // 获取元素列表 - 返回带有 attr() 方法的元素包装对象
+        // 参考 Legado AnalyzeByJSoup.getElements()
         getElements: (rule: string, mContent?: any) => {
           if (!rule) return [];
           const cheerio = require('cheerio');
@@ -1797,7 +1874,8 @@ function executeJs(
                 try {
                   const json = JSON.parse(content);
                   const { JSONPath } = require('jsonpath-plus');
-                  const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  let jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+                  jsonRule = fixLegadoJsonPath(jsonRule);
                   const results = JSONPath({ path: jsonRule, json, wrap: true });
                   return Array.isArray(results) ? results : [results];
                 } catch {
@@ -1809,7 +1887,31 @@ function executeJs(
               $ = content;
             }
             
-            return $(rule).toArray();
+            // 包装元素，添加 attr() 方法以兼容 Legado 的 JSoup Element
+            const elements = $(rule).toArray();
+            return elements.map((el: any) => {
+              const $el = $(el);
+              return {
+                // 获取/设置属性
+                attr: (name: string, value?: string) => {
+                  if (value !== undefined) {
+                    $el.attr(name, value);
+                    return $el;
+                  }
+                  return $el.attr(name) || '';
+                },
+                // 获取文本
+                text: () => $el.text(),
+                // 获取 HTML
+                html: () => $el.html() || '',
+                outerHtml: () => $.html($el),
+                // 获取子元素
+                select: (selector: string) => $el.find(selector).toArray(),
+                // 原始元素
+                _element: el,
+                _$: $el,
+              };
+            });
           } catch {
             return [];
           }
@@ -2005,19 +2107,39 @@ function executeJs(
       },
       
       // ==================== Cookie 和 Cache ====================
+      // cookie 对象 - 使用持久化的 CookieStore
       cookie: {
-        getCookie: (tag: string, key?: string) => '',
-        setCookie: (tag: string, cookie: string) => {},
-        removeCookie: (tag: string) => {},
+        getCookie: (tag: string, key?: string) => {
+          if (key) {
+            return CookieStore.getKey(tag, key);
+          }
+          return CookieStore.getCookie(tag);
+        },
+        setCookie: (tag: string, cookie: string) => {
+          CookieStore.setCookie(tag, cookie);
+        },
+        replaceCookie: (tag: string, cookie: string) => {
+          CookieStore.replaceCookie(tag, cookie);
+        },
+        removeCookie: (tag: string) => {
+          CookieStore.removeCookie(tag);
+        },
+        contains: (tag: string, key: string) => {
+          return CookieStore.contains(tag, key);
+        },
       },
+      // cache 对象 - 使用持久化的 CacheManager
       cache: {
-        get: (key: string) => context.variables[`_cache_${key}`],
-        put: (key: string, value: any) => {
-          context.variables[`_cache_${key}`] = value;
+        get: (key: string) => CacheManager.get(key),
+        put: (key: string, value: any, saveTime?: number) => {
+          CacheManager.put(key, value, saveTime || 0);
         },
         delete: (key: string) => {
-          delete context.variables[`_cache_${key}`];
+          CacheManager.delete(key);
         },
+        getInt: (key: string) => CacheManager.getInt(key),
+        getLong: (key: string) => CacheManager.getLong(key),
+        getDouble: (key: string) => CacheManager.getDouble(key),
       },
 
       // ==================== 全局 Get/Put 函数 ====================
@@ -2032,13 +2154,14 @@ function executeJs(
         try {
           // 检查缓存
           const cacheKey = `_reload_${url}`;
-          if (context.variables[cacheKey]) {
-            return context.variables[cacheKey];
+          const cached = CacheManager.get(cacheKey);
+          if (cached) {
+            return cached;
           }
           // 从网络加载
           const response = syncHttpRequest(url);
           if (response.body) {
-            context.variables[cacheKey] = response.body;
+            CacheManager.put(cacheKey, response.body, 3600); // 缓存1小时
             return response.body;
           }
           return '';
@@ -2079,27 +2202,64 @@ function executeJs(
         },
       },
 
-      // source 对象（书源相关方法）
+      // source 对象（书源相关方法）- 参考 Legado BaseSource.kt
       source: {
-        get: (key: string) => context.variables[key],
+        // 获取保存的数据 - source.get(key)
+        get: (key: string) => context.variables[`v_${key}`] || context.variables[key] || '',
+        // 保存数据 - source.put(key, value)
         put: (key: string, value: any) => {
-          context.variables[key] = value;
-          return value;
+          context.variables[`v_${key}`] = String(value);
+          return String(value);
         },
+        // 获取登录信息
         getLoginInfoMap: () => context.variables['_loginInfo'] || {},
+        getLoginInfo: () => context.variables['_loginInfoStr'] || null,
         putLoginInfo: (info: string) => {
           try {
             context.variables['_loginInfo'] = JSON.parse(info);
-          } catch {}
+            context.variables['_loginInfoStr'] = info;
+            return true;
+          } catch {
+            return false;
+          }
         },
+        // 获取书源标识
         getKey: () => context.variables['_sourceUrl'] || context.baseUrl || '',
-        setVariable: (data: string) => {
-          try {
-            Object.assign(context.variables, JSON.parse(data));
-          } catch {}
-          return data;
+        getTag: () => context.variables['_sourceUrl'] || context.baseUrl || '',
+        // 设置自定义变量 - source.setVariable(jsonString)
+        setVariable: (data: string | null) => {
+          if (data) {
+            context.variables['_sourceVariable'] = data;
+            try {
+              // 同时解析为对象方便访问
+              const parsed = JSON.parse(data);
+              if (typeof parsed === 'object') {
+                Object.assign(context.variables, parsed);
+              }
+            } catch {}
+          } else {
+            delete context.variables['_sourceVariable'];
+          }
         },
-        getVariable: (key: string) => context.variables[key],
+        // 获取自定义变量 - source.getVariable() 返回整个变量字符串
+        getVariable: () => context.variables['_sourceVariable'] || '',
+        // 登录头相关
+        getLoginHeader: () => context.variables['_loginHeader'] || null,
+        getLoginHeaderMap: () => {
+          const header = context.variables['_loginHeader'];
+          if (!header) return null;
+          try {
+            return JSON.parse(header);
+          } catch {
+            return null;
+          }
+        },
+        putLoginHeader: (header: string) => {
+          context.variables['_loginHeader'] = header;
+        },
+        removeLoginHeader: () => {
+          delete context.variables['_loginHeader'];
+        },
       },
 
       // ==================== 全局工具函数 ====================
@@ -2119,6 +2279,11 @@ function executeJs(
       Date: Date,
       RegExp: RegExp,
       Buffer: Buffer,
+      Function: Function,
+      Error: Error,
+      // Base64 编解码 - 某些混淆代码需要
+      atob: (str: string) => Buffer.from(str, 'base64').toString('utf8'),
+      btoa: (str: string) => Buffer.from(str, 'utf8').toString('base64'),
       console: {
         log: (...args: any[]) => console.log('[JS]', ...args),
         warn: (...args: any[]) => console.warn('[JS]', ...args),
@@ -2126,6 +2291,21 @@ function executeJs(
       },
       setTimeout: setTimeout,
       clearTimeout: clearTimeout,
+      setInterval: setInterval,
+      clearInterval: clearInterval,
+      
+      // Legado 内置函数
+      // Url() - 返回书源 URL
+      Url: () => {
+        const sourceUrl = context.variables._sourceUrl || context.baseUrl || '';
+        // 提取基础 URL（协议 + 域名）
+        try {
+          const url = new URL(sourceUrl);
+          return `${url.protocol}//${url.host}`;
+        } catch {
+          return sourceUrl;
+        }
+      },
       
       // eval 函数支持
       eval: (code: string) => {
@@ -2139,16 +2319,57 @@ function executeJs(
       },
     };
 
+    // 添加 window 和 global 对象（指向 sandbox 自身）
+    // 某些混淆代码使用 Function("return this")() 获取全局对象
+    (sandbox as any).window = sandbox;
+    (sandbox as any).global = sandbox;
+    (sandbox as any).globalThis = sandbox;
+    (sandbox as any).self = sandbox;
+
     // 创建上下文
     const vmContext = vm.createContext(sandbox);
 
     // 先加载 jsLib（如果有）
+    // jsLib 可能是 JSON 对象（指向远程 JS 文件的 URL）或直接的 JS 代码
     const jsLib = context.variables['_jsLib'];
     if (jsLib) {
       try {
-        const convertedJsLib = convertRhinoToES6(jsLib);
-        const jsLibScript = new vm.Script(convertedJsLib);
-        jsLibScript.runInContext(vmContext, { timeout: 5000 });
+        // 检查是否是 JSON 对象
+        if (jsLib.trim().startsWith('{') && jsLib.trim().endsWith('}')) {
+          try {
+            const jsMap = JSON.parse(jsLib);
+            // 遍历 JSON 对象，下载并执行每个 JS 文件
+            for (const [key, url] of Object.entries(jsMap)) {
+              if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+                // 从缓存或网络获取 JS 代码
+                const cacheKey = `_jsLib_${url}`;
+                let jsCode = CacheManager.get(cacheKey);
+                if (!jsCode) {
+                  const response = syncHttpRequest(url);
+                  if (response.body) {
+                    jsCode = response.body;
+                    CacheManager.put(cacheKey, jsCode, 86400); // 缓存24小时
+                  }
+                }
+                if (jsCode) {
+                  const convertedJsLib = convertRhinoToES6(jsCode);
+                  const jsLibScript = new vm.Script(convertedJsLib);
+                  jsLibScript.runInContext(vmContext, { timeout: 10000 });
+                }
+              }
+            }
+          } catch (jsonError) {
+            // 不是有效的 JSON，作为普通 JS 代码执行
+            const convertedJsLib = convertRhinoToES6(jsLib);
+            const jsLibScript = new vm.Script(convertedJsLib);
+            jsLibScript.runInContext(vmContext, { timeout: 5000 });
+          }
+        } else {
+          // 直接作为 JS 代码执行
+          const convertedJsLib = convertRhinoToES6(jsLib);
+          const jsLibScript = new vm.Script(convertedJsLib);
+          jsLibScript.runInContext(vmContext, { timeout: 5000 });
+        }
       } catch (e) {
         console.error('[JS] jsLib execution error:', e);
       }
@@ -2156,7 +2377,8 @@ function executeJs(
 
     // 执行代码（使用已转换的代码）
     const script = new vm.Script(convertedCode);
-    return script.runInContext(vmContext, { timeout: 5000 });
+    const result = script.runInContext(vmContext, { timeout: 5000 });
+    return result;
   } catch (error) {
     console.error('JS execution error:', error);
     return null;
@@ -2255,6 +2477,19 @@ function processVariables(
       innerRule = innerRule.substring(2); // Default 规则
     }
 
+    // 对于 JSONPath，先检查 variables 中是否有对应的值
+    // 例如 {{$..comic_id}} 或 {{$.comic_id}}，先检查 variables.comic_id
+    if (innerRule.startsWith('$.') || innerRule.startsWith('$..')) {
+      // 提取最后一个属性名
+      const pathMatch = innerRule.match(/\.(\w+)$/);
+      if (pathMatch) {
+        const varName = pathMatch[1];
+        if (context.variables[varName] !== undefined) {
+          return String(context.variables[varName]);
+        }
+      }
+    }
+
     // 执行内部规则
     const ctx: ParseContext = {
       body: context.body,
@@ -2265,9 +2500,15 @@ function processVariables(
     return result.success && result.data ? String(result.data) : '';
   });
 
-  // 处理 {} - JSONPath 简写
+  // 处理 {} - JSONPath 简写或变量引用
+  // 注意：不处理看起来像 JSON 对象的内容（如 {'webView': true}）
   const singleBraceRegex = /\{([^{}]+)\}/g;
-  processed = processed.replace(singleBraceRegex, (_, path) => {
+  processed = processed.replace(singleBraceRegex, (match, path) => {
+    // 如果内容包含 ' 或 " 或 :，可能是 JSON 对象，保持原样
+    if (path.includes("'") || path.includes('"') || path.includes(':')) {
+      return match; // 返回原始匹配，不做替换
+    }
+    
     if (path.startsWith('$.')) {
       try {
         const data = JSON.parse(context.body);
@@ -2277,7 +2518,11 @@ function processVariables(
         return '';
       }
     }
-    return context.variables[path] || '';
+    // 只处理看起来像变量名的内容（字母数字下划线）
+    if (/^[\w]+$/.test(path)) {
+      return context.variables[path] !== undefined ? String(context.variables[path]) : '';
+    }
+    return match; // 不是有效变量名，保持原样
   });
 
   return processed;
@@ -2361,26 +2606,67 @@ export function resolveUrl(url: string, baseUrl: string): string {
  * 解析规则分隔符
  * 支持 || (或) 和 && (与) 和 %% (格式化)
  * 注意：不在 JS 代码块内部分割
+ * 
+ * 参考 Legado AnalyzeRule.kt 的规则解析
+ * 规则格式: rule1||rule2@js:code 或 rule1&&rule2##regex##replacement
+ * 
+ * 返回值增加 jsSuffix 字段，用于在所有规则执行完后应用 @js: 代码
  */
 export function splitRule(rule: string): {
   rules: string[];
   operator: 'or' | 'and' | 'format';
+  jsSuffix?: string;  // @js: 后缀，应用于最终结果
+  headerSuffix?: string; // @Header:{} 后缀，用于请求头（异次元格式）
 } {
-  // 如果包含 JS 代码块，不进行分割
-  if (/<js>[\s\S]*?<\/js>/i.test(rule) || rule.includes('@js:')) {
+  // 如果包含 <js></js> 代码块，不进行分割
+  if (/<js>[\s\S]*?<\/js>/i.test(rule)) {
     return { rules: [rule], operator: 'or' };
   }
   
-  if (rule.includes('||')) {
-    return { rules: rule.split('||'), operator: 'or' };
+  // 先处理 @Header:{} 后缀（异次元格式）
+  // 格式: rule@Header:{key:value}
+  let headerSuffix: string | undefined;
+  let ruleWithoutHeader = rule;
+  const headerMatch = rule.match(/@Header:\{[^}]+\}$/);
+  if (headerMatch) {
+    headerSuffix = headerMatch[0];
+    ruleWithoutHeader = rule.substring(0, rule.length - headerSuffix.length).trim();
   }
-  if (rule.includes('&&')) {
-    return { rules: rule.split('&&'), operator: 'and' };
+  
+  // 处理 @js: 后缀 - 先分离 @js: 部分
+  // 格式: rule1||rule2@js:code
+  // 应该解析为: 先执行 (rule1||rule2)，然后将结果传递给 @js:code
+  let mainRule = ruleWithoutHeader;
+  let jsSuffix: string | undefined;
+  
+  // 查找 @js: 的位置
+  const jsIndex = rule.indexOf('@js:');
+  if (jsIndex > 0) {
+    const beforeJs = rule.substring(0, jsIndex);
+    // 检查 @js: 前面是否有 || 或 && 或 %%
+    if (beforeJs.includes('||') || beforeJs.includes('&&') || beforeJs.includes('%%')) {
+      mainRule = beforeJs;
+      jsSuffix = rule.substring(jsIndex);
+    }
   }
-  if (rule.includes('%%')) {
-    return { rules: rule.split('%%'), operator: 'format' };
+  
+  let rules: string[];
+  let operator: 'or' | 'and' | 'format' = 'or';
+  
+  if (mainRule.includes('||')) {
+    rules = mainRule.split('||');
+    operator = 'or';
+  } else if (mainRule.includes('&&')) {
+    rules = mainRule.split('&&');
+    operator = 'and';
+  } else if (mainRule.includes('%%')) {
+    rules = mainRule.split('%%');
+    operator = 'format';
+  } else {
+    rules = [mainRule];
   }
-  return { rules: [rule], operator: 'or' };
+  
+  return { rules, operator, jsSuffix, headerSuffix };
 }
 
 /**
@@ -2399,7 +2685,9 @@ function executeSingleRule(
   // 处理换行符分隔的规则链
   // 例如: "a.0@href\n@js:##regex##replacement###"
   // 第一条规则获取结果，后续规则对结果进行处理
-  if (rule.includes('\n')) {
+  // 注意：如果规则包含 <js>...</js> 标签，不进行换行分割
+  const hasJsTag = /<js>[\s\S]*?<\/js>/i.test(rule);
+  if (rule.includes('\n') && !hasJsTag) {
     let lines = rule.split('\n').map(l => l.trim()).filter(l => l);
     
     // 处理 @js: 后面紧跟换行符的情况
@@ -2581,7 +2869,7 @@ export function parseRule(ctx: ParseContext, rule: string): ParseResult {
   }
 
   try {
-    const { rules, operator } = splitRule(rule);
+    const { rules, operator, jsSuffix } = splitRule(rule);
     let results: any[] = [];
     const allResults: any[][] = []; // 用于 %% 格式化
 
@@ -2619,6 +2907,30 @@ export function parseRule(ctx: ParseContext, rule: string): ParseResult {
           }
         }
       }
+    }
+
+    // 处理 @js: 后缀 - 将结果传递给 JS 代码
+    if (jsSuffix && results.length > 0) {
+      const jsCode = jsSuffix.substring(4); // 去掉 @js:
+      const jsResults: any[] = [];
+      for (const result of results) {
+        try {
+          const jsContext = {
+            result: result,
+            src: ctx.body,
+            baseUrl: ctx.baseUrl,
+            variables: ctx.variables,
+          };
+          const jsResult = executeJs(jsCode, jsContext);
+          if (jsResult !== null && jsResult !== undefined) {
+            jsResults.push(jsResult);
+          }
+        } catch (e) {
+          // JS 执行失败，保留原结果
+          jsResults.push(result);
+        }
+      }
+      results = jsResults;
     }
 
     return {
@@ -2671,9 +2983,42 @@ export function parseList(
       return shouldReverse ? results.reverse() : results;
     }
 
+    // 先处理 || 分隔符（或规则）
+    // 例如: "$..list[*]||$.data[*]" 应该先尝试第一个，如果没结果再尝试第二个
+    if (actualRule.includes('||') && !actualRule.includes('@js:') && !/<js>/i.test(actualRule)) {
+      const orRules = actualRule.split('||');
+      for (const orRule of orRules) {
+        const orResults = parseList({ ...ctx }, orRule.trim());
+        if (orResults.length > 0) {
+          return shouldReverse ? orResults.reverse() : orResults;
+        }
+      }
+      return [];
+    }
+
     // JSON 列表
-    if (actualRule.startsWith('@json:') || actualRule.startsWith('$.')) {
-      results = parseJson(ctx.body, actualRule);
+    // 支持格式: @json:, $., data.xxx (异次元图源格式)
+    // 注意: 需要排除 Legado 语法前缀 (class., id., tag., text.)
+    // 还需要排除 HTML 标签.类名 格式 (如 ul.book-list, div.container)
+    const legadoPrefixes = ['class.', 'id.', 'tag.', 'text.'];
+    const isLegadoSyntax = legadoPrefixes.some(prefix => actualRule.startsWith(prefix));
+    
+    // 检查是否是 HTML 标签.类名 格式（CSS 选择器）
+    // HTML 标签通常是短的小写字母，后面跟 . 和类名
+    const htmlTags = ['a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu', 'meta', 'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre', 'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr'];
+    const firstPart = actualRule.split(/[.@#\[\s]/)[0].toLowerCase();
+    const isHtmlTagSelector = htmlTags.includes(firstPart);
+    
+    const isJsonPath = actualRule.startsWith('@json:') || actualRule.startsWith('$.') || 
+      (!isLegadoSyntax && !isHtmlTagSelector && /^[a-zA-Z_]\w*\./.test(actualRule));
+    
+    if (isJsonPath) {
+      // 如果是 data.xxx 格式，转换为 $.data.xxx
+      let jsonRule = actualRule;
+      if (!jsonRule.startsWith('@json:') && !jsonRule.startsWith('$.') && /^[a-zA-Z_]\w*\./.test(jsonRule)) {
+        jsonRule = '$.' + jsonRule;
+      }
+      results = parseJson(ctx.body, jsonRule);
       results = Array.isArray(results) ? results : [results];
       return shouldReverse ? results.reverse() : results;
     }
@@ -2844,4 +3189,5 @@ export default {
   splitRule,
   syncHttpRequest,
   asyncHttpRequest,
+  createSymmetricCrypto,
 };

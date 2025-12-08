@@ -193,9 +193,56 @@ export class SourceDebugger {
   private source: BookSource;
   private logs: DebugLog[] = [];
   private variables: Record<string, any> = {};
+  private initialized: boolean = false;
 
   constructor(source: BookSource) {
     this.source = source;
+    // 设置书源相关变量
+    this.variables['_sourceUrl'] = source.bookSourceUrl;
+    this.variables['_sourceName'] = source.bookSourceName;
+  }
+
+  /**
+   * 初始化书源 - 执行 loginUrl 中的初始化代码
+   * 参考 Legado BaseSource.kt 的 login() 方法
+   * 
+   * 很多书源的 searchUrl 中会调用 eval(String(source.loginUrl))
+   * 这会执行 loginUrl 中的代码来初始化变量
+   */
+  private async initSource(): Promise<void> {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    const loginUrl = this.source.loginUrl;
+    if (!loginUrl) return;
+
+    // 提取 JS 代码
+    let jsCode: string | null = null;
+    if (loginUrl.startsWith('@js:')) {
+      jsCode = loginUrl.substring(4);
+    } else if (loginUrl.startsWith('<js>')) {
+      const endIndex = loginUrl.lastIndexOf('</js>');
+      jsCode = loginUrl.substring(4, endIndex > 0 ? endIndex : loginUrl.length);
+    } else if (!loginUrl.startsWith('http')) {
+      // 不是 URL，可能是纯 JS 代码
+      jsCode = loginUrl;
+    }
+
+    if (jsCode) {
+      try {
+        // 使用 AnalyzeUrl 执行初始化，它会在构建 URL 时执行 JS
+        // 将 loginUrl 作为 URL 传入，让 AnalyzeUrl 处理 JS 执行
+        const analyzeUrl = new AnalyzeUrl(`@js:${jsCode}`, {
+          source: this.source,
+          variables: this.variables,
+          baseUrl: this.getBaseUrl(),
+        });
+        // AnalyzeUrl 构造时会执行 JS，变量会被更新到 this.variables
+        this.log('info', 'parse', '书源初始化完成');
+      } catch (e: any) {
+        this.log('warning', 'parse', `书源初始化失败: ${e.message}`);
+      }
+    }
   }
 
   /**
@@ -243,7 +290,14 @@ export class SourceDebugger {
    */
   private extractUrlParams(url: string): void {
     try {
-      const urlObj = new URL(url);
+      // 先移除 Legado 格式的请求配置 (URL,{config})
+      let cleanUrl = url;
+      const configMatch = url.match(/^(.+?),(\{[\s\S]*\})$/);
+      if (configMatch) {
+        cleanUrl = configMatch[1];
+      }
+      
+      const urlObj = new URL(cleanUrl);
       // 提取查询参数
       urlObj.searchParams.forEach((value, key) => {
         if (value && !this.variables[key]) {
@@ -253,7 +307,7 @@ export class SourceDebugger {
       });
       
       // 尝试从路径中提取 ID（常见模式：/book/123/, /comic/456/）
-      const pathMatch = url.match(/\/(\d+)\/?(?:\?|$)/);
+      const pathMatch = cleanUrl.match(/\/(\d+)\/?(?:\?|$)/);
       if (pathMatch && !this.variables['id']) {
         this.variables['id'] = pathMatch[1];
         this.log('info', 'parse', `从 URL 路径提取 ID: ${pathMatch[1]}`);
@@ -306,6 +360,8 @@ export class SourceDebugger {
               const d = new Date(time);
               return d.toISOString();
             },
+            // WebView UA
+            getWebViewUA: () => 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
           },
           JSON,
           Date,
@@ -356,17 +412,50 @@ export class SourceDebugger {
       return null;
     }
     
-    // JS 规则
-    const jsCode = initRule.startsWith('@js:') ? initRule.substring(4) : initRule;
+    // JSONPath 规则 (以 $. 或 $[ 开头，或以 @json: 开头)
+    if (initRule.startsWith('$.') || initRule.startsWith('$[') || initRule.startsWith('@json:')) {
+      try {
+        const { JSONPath } = require('jsonpath-plus');
+        const jsonRule = initRule.startsWith('@json:') ? initRule.substring(6) : initRule;
+        const json = JSON.parse(body);
+        const results = JSONPath({ path: jsonRule, json, wrap: false });
+        return results;
+      } catch (e: any) {
+        console.error('[executeBookInfoInit] JSONPath error:', e.message);
+        return null;
+      }
+    }
+    
+    // JS 规则 (以 @js: 或 <js> 开头)
+    if (!initRule.startsWith('@js:') && !initRule.startsWith('<js>')) {
+      // 不是 JS 规则，尝试作为 CSS 选择器处理
+      try {
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(body);
+        const result = $(initRule).first();
+        if (result.length) {
+          return result.html() || result.text();
+        }
+      } catch {}
+      return null;
+    }
+    
+    const jsCode = initRule.startsWith('@js:') ? initRule.substring(4) : 
+                   initRule.replace(/<\/?js>/gi, '');
+    
+    const { createSymmetricCrypto } = require('./rule-parser');
+    const { JSONPath } = require('jsonpath-plus');
+    const cheerio = require('cheerio');
+    const self = this;
     
     const sandbox = {
       result: body,
       baseUrl: this.getBaseUrl(),
       source: this.source,
       java: {
-        get: (key: string) => this.variables[key],
+        get: (key: string) => self.variables[key],
         put: (key: string, value: any) => {
-          this.variables[key] = value;
+          self.variables[key] = value;
           return value;
         },
         ajax: (url: string) => {
@@ -380,9 +469,71 @@ export class SourceDebugger {
         base64Decode: (str: string) => Buffer.from(str, 'base64').toString('utf8'),
         base64Encode: (str: string) => Buffer.from(str).toString('base64'),
         md5Encode: (str: string) => crypto.createHash('md5').update(str).digest('hex'),
+        // AES 加解密
+        aesBase64DecodeToString: (str: string, key: string, transformation: string, iv: string) => {
+          try {
+            return createSymmetricCrypto(transformation, key, iv).decryptStr(str);
+          } catch { return ''; }
+        },
+        aesDecodeToString: (data: string, key: string, transformation: string, iv: string) => {
+          try {
+            return createSymmetricCrypto(transformation, key, iv).decryptStr(data);
+          } catch { return ''; }
+        },
+        // 时间格式化
+        timeFormat: (time: number | string) => {
+          try {
+            const timestamp = typeof time === 'string' ? parseInt(time) : time;
+            if (isNaN(timestamp) || !isFinite(timestamp)) return '';
+            const date = new Date(timestamp);
+            if (isNaN(date.getTime())) return '';
+            return date.toISOString().replace('T', ' ').replace('Z', '');
+          } catch { return ''; }
+        },
+        // getString - 从内容中提取字符串
+        getString: (rule: string, mContent?: any, isUrl?: boolean) => {
+          if (!rule) return '';
+          const content = mContent || body;
+          try {
+            // JSONPath 规则
+            if (rule.startsWith('$.') || rule.startsWith('$[') || rule.startsWith('@json:')) {
+              const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+              const json = typeof content === 'string' ? JSON.parse(content) : content;
+              const results = JSONPath({ path: jsonRule, json, wrap: false });
+              return Array.isArray(results) ? results[0]?.toString() || '' : results?.toString() || '';
+            }
+            // CSS 选择器
+            const $ = cheerio.load(content);
+            const parts = rule.split('@');
+            const selector = parts.slice(0, -1).join('@') || parts[0];
+            const attr = parts.length > 1 ? parts[parts.length - 1] : 'text';
+            const el = $(selector).first();
+            if (attr === 'text') return el.text().trim();
+            if (attr === 'html') return el.html() || '';
+            return el.attr(attr) || '';
+          } catch { return ''; }
+        },
+        // getStringList - 从内容中提取字符串列表
+        getStringList: (rule: string, mContent?: any, isUrl?: boolean) => {
+          if (!rule) return [];
+          const content = mContent || body;
+          try {
+            if (rule.startsWith('$.') || rule.startsWith('$[') || rule.startsWith('@json:')) {
+              const jsonRule = rule.startsWith('@json:') ? rule.substring(6) : rule;
+              const json = typeof content === 'string' ? JSON.parse(content) : content;
+              const results = JSONPath({ path: jsonRule, json, wrap: true });
+              const arr = Array.isArray(results) ? results : [results];
+              (arr as any).toArray = () => arr;
+              return arr;
+            }
+            return [];
+          } catch { return []; }
+        },
       },
       JSON,
       console,
+      String,
+      Math,
     };
     
     try {
@@ -402,6 +553,9 @@ export class SourceDebugger {
     this.logs = [];
 
     try {
+      // 0. 初始化书源（执行 loginUrl 中的初始化代码）
+      await this.initSource();
+
       // 1. 使用 AnalyzeUrl 构建搜索URL (兼容 Legado 的 <js>, @js:, {{}} 等语法)
       const analyzeUrl = this.buildSearchUrlAnalyze(keyword);
       if (!analyzeUrl) {
@@ -690,9 +844,21 @@ export class SourceDebugger {
       const responseBody = requestResult.body || '';
 
       // 使用 ruleExplore 或 ruleSearch 解析
-      const ruleExplore = this.source.ruleExplore || this.source.ruleSearch;
-      if (!ruleExplore) {
-        this.log('warning', 'parse', '未配置发现规则，尝试使用搜索规则');
+      // 参考 Legado BookList.kt: 当 exploreRule.bookList 为空时，使用 searchRule
+      let bookListRule: BookListRule | undefined;
+      
+      if (this.source.ruleExplore?.bookList) {
+        // exploreRule.bookList 不为空，使用 exploreRule
+        bookListRule = this.source.ruleExplore;
+        this.log('info', 'parse', '使用发现规则解析');
+      } else if (this.source.ruleSearch?.bookList) {
+        // exploreRule.bookList 为空，回退到 searchRule
+        bookListRule = this.source.ruleSearch;
+        this.log('info', 'parse', '发现规则的 bookList 为空，使用搜索规则解析');
+      }
+      
+      if (!bookListRule) {
+        this.log('warning', 'parse', '未配置发现规则和搜索规则');
         return {
           success: true,
           logs: this.logs,
@@ -713,11 +879,11 @@ export class SourceDebugger {
       };
 
       // 解析书籍列表
-      const bookList = parseList(ctx, ruleExplore.bookList || '');
+      const bookList = parseList(ctx, bookListRule.bookList || '');
       this.log(
         'info',
         'parse',
-        `书籍列表规则 "${ruleExplore.bookList}" 匹配到 ${bookList.length} 个元素`
+        `书籍列表规则 "${bookListRule.bookList}" 匹配到 ${bookList.length} 个元素`
       );
 
       if (bookList.length === 0) {
@@ -746,7 +912,7 @@ export class SourceDebugger {
         ];
 
         for (const field of fields) {
-          const rule = ruleExplore[field];
+          const rule = bookListRule[field];
           if (rule) {
             const variables = isJsonElement ? { _jsResult: element } : {};
             const result = parseFromElement(
@@ -822,16 +988,89 @@ export class SourceDebugger {
       } else {
         // 普通 URL 处理
         let url = bookUrl;
+        let customHeaders: Record<string, string> = {};
+        let method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
+        let requestBody: string | undefined;
+        let useWebView = false;
+        
+        // 检查是否包含 Legado 格式的请求配置 (URL,{config})
+        const configMatch = url.match(/^(.+?),(\{[\s\S]*\})$/);
+        if (configMatch) {
+          url = configMatch[1];
+          try {
+            const config = JSON.parse(configMatch[2]);
+            if (config.headers) {
+              customHeaders = config.headers;
+            }
+            if (config.method) {
+              const m = config.method.toUpperCase();
+              if (m === 'GET' || m === 'POST' || m === 'PUT' || m === 'DELETE') {
+                method = m;
+              }
+            }
+            if (config.body) {
+              requestBody = typeof config.body === 'string' ? config.body : JSON.stringify(config.body);
+            }
+            if (config.webView === true) {
+              useWebView = true;
+            }
+          } catch (e) {
+            // 解析失败，忽略配置
+          }
+        }
+        
         if (!url.startsWith('http')) {
           url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
         }
 
-        this.log('info', 'request', `请求书籍详情: ${url}`);
+        this.log('info', 'request', `请求书籍详情: ${url}${useWebView ? ' (WebView)' : ''}`);
 
-        requestResult = await httpRequest({
-          url,
-          headers: this.getHeaders(),
-        });
+        if (useWebView) {
+          // 使用 WebView 获取渲染后的页面
+          try {
+            const { webView } = require('./webview');
+            const webViewResult = await webView({
+              url,
+              headers: { ...this.getHeaders(), ...customHeaders },
+              delayTime: 2000,
+              isMobile: this.isMobileSource(),
+            });
+            
+            if (webViewResult.success) {
+              requestResult = {
+                success: true,
+                statusCode: 200,
+                body: webViewResult.body,
+                headers: {},
+                responseTime: 0,
+              };
+              this.log('success', 'request', 'WebView 渲染成功');
+            } else {
+              this.log('warning', 'request', `WebView 失败: ${webViewResult.error}，降级到普通请求`);
+              requestResult = await httpRequest({
+                url,
+                method,
+                headers: { ...this.getHeaders(), ...customHeaders },
+                body: requestBody,
+              });
+            }
+          } catch (e: any) {
+            this.log('warning', 'request', `WebView 异常: ${e.message}，降级到普通请求`);
+            requestResult = await httpRequest({
+              url,
+              method,
+              headers: { ...this.getHeaders(), ...customHeaders },
+              body: requestBody,
+            });
+          }
+        } else {
+          requestResult = await httpRequest({
+            url,
+            method,
+            headers: { ...this.getHeaders(), ...customHeaders },
+            body: requestBody,
+          });
+        }
         
         body = requestResult.body || '';
         
@@ -873,6 +1112,8 @@ export class SourceDebugger {
           if (initResult) {
             // 如果返回 JSON 对象，存储供后续规则使用
             this.variables['_bookInfoInit'] = initResult;
+            // 同时存储为 _jsResult，供 {{$.xxx}} 变量替换使用
+            this.variables['_jsResult'] = initResult;
             processedBody = typeof initResult === 'string' ? initResult : JSON.stringify(initResult);
             this.log('success', 'parse', 'bookInfoInit 预处理成功');
           }
@@ -970,16 +1211,89 @@ export class SourceDebugger {
       } else {
         // 普通 URL 处理
         let url = tocUrl;
+        let customHeaders: Record<string, string> = {};
+        let method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
+        let requestBody: string | undefined;
+        let useWebView = false;
+        
+        // 检查是否包含 Legado 格式的请求配置 (URL,{config})
+        const configMatch = url.match(/^(.+?),(\{[\s\S]*\})$/);
+        if (configMatch) {
+          url = configMatch[1];
+          try {
+            const config = JSON.parse(configMatch[2]);
+            if (config.headers) {
+              customHeaders = config.headers;
+            }
+            if (config.method) {
+              const m = config.method.toUpperCase();
+              if (m === 'GET' || m === 'POST' || m === 'PUT' || m === 'DELETE') {
+                method = m;
+              }
+            }
+            if (config.body) {
+              requestBody = typeof config.body === 'string' ? config.body : JSON.stringify(config.body);
+            }
+            if (config.webView === true) {
+              useWebView = true;
+            }
+          } catch (e) {
+            // 解析失败，忽略配置
+          }
+        }
+        
         if (!url.startsWith('http')) {
           url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
         }
 
-        this.log('info', 'request', `请求目录: ${url}`);
+        this.log('info', 'request', `请求目录: ${url}${useWebView ? ' (WebView)' : ''}`);
 
-        requestResult = await httpRequest({
-          url,
-          headers: this.getHeaders(),
-        });
+        if (useWebView) {
+          // 使用 WebView 获取渲染后的页面
+          try {
+            const { webView } = require('./webview');
+            const webViewResult = await webView({
+              url,
+              headers: { ...this.getHeaders(), ...customHeaders },
+              delayTime: 2000,
+              isMobile: this.isMobileSource(),
+            });
+            
+            if (webViewResult.success) {
+              requestResult = {
+                success: true,
+                statusCode: 200,
+                body: webViewResult.body,
+                headers: {},
+                responseTime: 0,
+              };
+              this.log('success', 'request', 'WebView 渲染成功');
+            } else {
+              this.log('warning', 'request', `WebView 失败: ${webViewResult.error}，降级到普通请求`);
+              requestResult = await httpRequest({
+                url,
+                method,
+                headers: { ...this.getHeaders(), ...customHeaders },
+                body: requestBody,
+              });
+            }
+          } catch (e: any) {
+            this.log('warning', 'request', `WebView 异常: ${e.message}，降级到普通请求`);
+            requestResult = await httpRequest({
+              url,
+              method,
+              headers: { ...this.getHeaders(), ...customHeaders },
+              body: requestBody,
+            });
+          }
+        } else {
+          requestResult = await httpRequest({
+            url,
+            method,
+            headers: { ...this.getHeaders(), ...customHeaders },
+            body: requestBody,
+          });
+        }
         
         body = requestResult.body || '';
         
@@ -1114,6 +1428,27 @@ export class SourceDebugger {
       this.extractUrlParams(contentUrl);
       
       let url = contentUrl;
+      let customHeaders: Record<string, string> = {};
+      
+      // 检查是否包含 Legado 格式的请求配置 (URL,{config})
+      const configMatch = url.match(/^(.+?),(\{[\s\S]*\})$/);
+      if (configMatch) {
+        url = configMatch[1];
+        try {
+          // 将单引号替换为双引号以便 JSON 解析
+          const configStr = configMatch[2].replace(/'/g, '"');
+          const config = JSON.parse(configStr);
+          if (config.headers) {
+            customHeaders = config.headers;
+          }
+          if (config.webView === true) {
+            useWebView = true;
+          }
+        } catch (e) {
+          // 解析失败，忽略配置
+        }
+      }
+      
       if (!url.startsWith('http')) {
         url = this.getBaseUrl() + (url.startsWith('/') ? '' : '/') + url;
       }
@@ -1122,13 +1457,15 @@ export class SourceDebugger {
 
       let requestResult: RequestResult;
       
+      const headers = { ...this.getHeaders(), ...customHeaders };
+      
       if (useWebView) {
         // 使用 WebView 获取渲染后的页面
         try {
           const { webView } = require('./webview');
           const webViewResult = await webView({
             url,
-            headers: this.getHeaders(),
+            headers,
             delayTime: 2000, // 等待 JS 渲染
             isMobile: this.isMobileSource(), // 根据书源自动判断
           });
@@ -1147,20 +1484,20 @@ export class SourceDebugger {
             // 降级到普通请求
             requestResult = await httpRequest({
               url,
-              headers: this.getHeaders(),
+              headers,
             });
           }
         } catch (e: any) {
           this.log('warning', 'request', `WebView 异常: ${e.message}`);
           requestResult = await httpRequest({
             url,
-            headers: this.getHeaders(),
+            headers,
           });
         }
       } else {
         requestResult = await httpRequest({
           url,
-          headers: this.getHeaders(),
+          headers,
         });
       }
 
@@ -1245,12 +1582,18 @@ export class SourceDebugger {
       }
 
       // 根据书源类型处理内容
+      // 注意：即使 bookSourceType 不是 IMAGE，如果内容包含 <img> 标签也按图片处理
       const isImageSource = this.source.bookSourceType === BookSourceType.IMAGE;
+      const hasImgTags = content.includes('<img');
       let imageUrls: string[] = [];
 
-      if (isImageSource) {
-        // 图片书源：提取图片URL列表
-        this.log('info', 'parse', '图片书源模式');
+      if (isImageSource || hasImgTags) {
+        // 图片书源或内容包含图片：提取图片URL列表
+        if (hasImgTags && !isImageSource) {
+          this.log('info', 'parse', '检测到图片内容，按图片模式处理');
+        } else {
+          this.log('info', 'parse', '图片书源模式');
+        }
         this.log('info', 'parse', `正文内容预览: ${content.substring(0, 200)}`);
         imageUrls = extractImageUrls(content, url);
         

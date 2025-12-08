@@ -13,9 +13,9 @@ import fs from 'fs';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
-import MenuBuilder from './menu';
+// import MenuBuilder from './menu'; // 已禁用默认菜单
 import { resolveHtmlPath } from './util';
-import { SourceDebugger, BookSource } from './debug';
+import { SourceDebugger, BookSource, YiciyuanDebugger, isYiciyuanSource } from './debug';
 import { getAIService, ChatMessage } from './ai/ai-service';
 
 class AppUpdater {
@@ -40,14 +40,21 @@ ipcMain.on('ipc-example', async (event, arg) => {
 
 /**
  * 搜索测试
+ * 自动识别源格式（Legado 或 异次元）
  */
 ipcMain.handle(
   'debug:search',
-  async (_event, source: BookSource, keyword: string) => {
+  async (_event, source: any, keyword: string) => {
     try {
-      const debugger_ = new SourceDebugger(source);
-      const result = await debugger_.debugSearch(keyword);
-      return result;
+      if (isYiciyuanSource(source)) {
+        const debugger_ = new YiciyuanDebugger(source);
+        const result = await debugger_.debugSearch(keyword);
+        return result;
+      } else {
+        const debugger_ = new SourceDebugger(source as BookSource);
+        const result = await debugger_.debugSearch(keyword);
+        return result;
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -60,14 +67,21 @@ ipcMain.handle(
 
 /**
  * 发现测试
+ * 自动识别源格式（Legado 或 异次元）
  */
 ipcMain.handle(
   'debug:explore',
-  async (_event, source: BookSource, exploreUrl: string) => {
+  async (_event, source: any, exploreUrl: string) => {
     try {
-      const debugger_ = new SourceDebugger(source);
-      const result = await debugger_.debugExplore(exploreUrl);
-      return result;
+      if (isYiciyuanSource(source)) {
+        const debugger_ = new YiciyuanDebugger(source);
+        const result = await debugger_.debugExplore(exploreUrl);
+        return result;
+      } else {
+        const debugger_ = new SourceDebugger(source as BookSource);
+        const result = await debugger_.debugExplore(exploreUrl);
+        return result;
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -80,14 +94,21 @@ ipcMain.handle(
 
 /**
  * 书籍详情测试
+ * 自动识别源格式（Legado 或 异次元）
  */
 ipcMain.handle(
   'debug:bookInfo',
-  async (_event, source: BookSource, bookUrl: string) => {
+  async (_event, source: any, bookUrl: string) => {
     try {
-      const debugger_ = new SourceDebugger(source);
-      const result = await debugger_.debugBookInfo(bookUrl);
-      return result;
+      if (isYiciyuanSource(source)) {
+        const debugger_ = new YiciyuanDebugger(source);
+        const result = await debugger_.debugBookInfo(bookUrl);
+        return result;
+      } else {
+        const debugger_ = new SourceDebugger(source as BookSource);
+        const result = await debugger_.debugBookInfo(bookUrl);
+        return result;
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -100,14 +121,21 @@ ipcMain.handle(
 
 /**
  * 目录测试
+ * 自动识别源格式（Legado 或 异次元）
  */
 ipcMain.handle(
   'debug:toc',
-  async (_event, source: BookSource, tocUrl: string) => {
+  async (_event, source: any, tocUrl: string) => {
     try {
-      const debugger_ = new SourceDebugger(source);
-      const result = await debugger_.debugToc(tocUrl);
-      return result;
+      if (isYiciyuanSource(source)) {
+        const debugger_ = new YiciyuanDebugger(source);
+        const result = await debugger_.debugToc(tocUrl);
+        return result;
+      } else {
+        const debugger_ = new SourceDebugger(source as BookSource);
+        const result = await debugger_.debugToc(tocUrl);
+        return result;
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -120,14 +148,21 @@ ipcMain.handle(
 
 /**
  * 正文测试
+ * 自动识别源格式（Legado 或 异次元）
  */
 ipcMain.handle(
   'debug:content',
-  async (_event, source: BookSource, contentUrl: string) => {
+  async (_event, source: any, contentUrl: string) => {
     try {
-      const debugger_ = new SourceDebugger(source);
-      const result = await debugger_.debugContent(contentUrl);
-      return result;
+      if (isYiciyuanSource(source)) {
+        const debugger_ = new YiciyuanDebugger(source);
+        const result = await debugger_.debugContent(contentUrl);
+        return result;
+      } else {
+        const debugger_ = new SourceDebugger(source as BookSource);
+        const result = await debugger_.debugContent(contentUrl);
+        return result;
+      }
     } catch (error: any) {
       return {
         success: false,
@@ -412,6 +447,7 @@ const createWindow = async () => {
     show: false,
     width: 1024,
     height: 728,
+    title: 'SourceDebug - 书源调试器',
     icon: getAssetPath('icon.png'),
     webPreferences: {
       preload: app.isPackaged
@@ -437,8 +473,8 @@ const createWindow = async () => {
     mainWindow = null;
   });
 
-  const menuBuilder = new MenuBuilder(mainWindow);
-  menuBuilder.buildMenu();
+  // 隐藏默认菜单栏
+  mainWindow.setMenuBarVisibility(false);
 
   // Open urls in the user's browser
   mainWindow.webContents.setWindowOpenHandler((edata) => {

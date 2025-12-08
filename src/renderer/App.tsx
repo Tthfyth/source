@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { MantineProvider, ColorSchemeScript } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { MainLayout } from './components/MainLayout';
+import { AppTourProvider } from './components/AppTour';
 import { useBookSourceStore } from './stores/bookSourceStore';
 import { theme } from './theme';
 
@@ -70,7 +71,9 @@ export default function App() {
       <ColorSchemeScript defaultColorScheme={colorScheme} />
       <MantineProvider theme={theme} defaultColorScheme={colorScheme}>
         <Notifications position="top-right" />
-        <MainLayout />
+        <AppTourProvider>
+          <MainLayout />
+        </AppTourProvider>
       </MantineProvider>
     </>
   );

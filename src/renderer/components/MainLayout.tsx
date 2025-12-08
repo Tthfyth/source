@@ -94,7 +94,7 @@ export function MainLayout() {
   }, [toggleLeft, toggleRight, toggleBottom]);
 
   return (
-    <Box h="100vh" w="100vw" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Box h="100vh" w="100vw" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }} data-tour="welcome">
       {/* 顶部工具栏 */}
       <TopToolbar
         isLeftCollapsed={isLeftCollapsed}
@@ -119,12 +119,16 @@ export function MainLayout() {
                 preferredSize={leftSize}
                 visible={!isLeftCollapsed}
               >
-                <SourceSidebar />
+                <Box h="100%" data-tour="source-list">
+                  <SourceSidebar />
+                </Box>
               </Allotment.Pane>
 
               {/* 中央编辑区：代码编辑器 */}
               <Allotment.Pane minSize={300}>
-                <CodeEditor />
+                <Box h="100%" data-tour="editor">
+                  <CodeEditor />
+                </Box>
               </Allotment.Pane>
 
               {/* 右侧调试面板：测试器 */}
@@ -133,7 +137,9 @@ export function MainLayout() {
                 preferredSize={rightSize}
                 visible={!isRightCollapsed}
               >
-                <DebugPanel />
+                <Box h="100%" data-tour="debug-panel">
+                  <DebugPanel />
+                </Box>
               </Allotment.Pane>
 
               {/* AI 对话面板 */}
@@ -142,7 +148,9 @@ export function MainLayout() {
                 preferredSize={aiSize}
                 visible={!isAICollapsed}
               >
-                <AIChatPanel />
+                <Box h="100%" data-tour="ai-panel">
+                  <AIChatPanel />
+                </Box>
               </Allotment.Pane>
             </Allotment>
           </Allotment.Pane>

@@ -20,6 +20,7 @@ import {
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import type { LogCategory, DebugLog } from '../types';
+import { SourceFormat, getSourceFormatLabel } from '../types';
 
 const categoryLabels: Record<LogCategory, string> = {
   request: '请求',
@@ -36,8 +37,11 @@ const categoryColors: Record<LogCategory, string> = {
 };
 
 export function DebugConsole() {
-  const { debugLogs, logFilters, setLogFilters, clearLogs } = useBookSourceStore();
+  const { debugLogs, logFilters, setLogFilters, clearLogs, getCurrentSourceFormat } = useBookSourceStore();
   const { colorScheme } = useMantineColorScheme();
+  
+  // 获取当前源格式
+  const sourceFormat = getCurrentSourceFormat();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -156,6 +160,14 @@ export function DebugConsole() {
       >
         <Group gap="xs">
           <Text size="sm" fw={500}>调试日志</Text>
+          {/* 源格式标签 */}
+          <Badge
+            size="xs"
+            variant="light"
+            color={sourceFormat === SourceFormat.Yiciyuan ? 'grape' : 'blue'}
+          >
+            {sourceFormat === SourceFormat.Yiciyuan ? '异次元图源' : 'Legado'}
+          </Badge>
           <Badge size="sm" variant="outline" style={{ fontFamily: 'monospace' }}>
             {filteredLogs.length}/{debugLogs.length}
           </Badge>

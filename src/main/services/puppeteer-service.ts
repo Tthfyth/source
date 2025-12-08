@@ -314,23 +314,84 @@ class PuppeteerService {
   }
 
   /**
+   * 智能截取文本内容
+   * 如果内容过长，截取开头、中间、尾部三段
+   * @param text 原始文本
+   * @param maxLength 最大长度
+   * @param sectionRatio 各段比例 [开头, 中间, 尾部]，默认 [0.4, 0.3, 0.3]
+   */
+  private smartTruncate(
+    text: string, 
+    maxLength: number, 
+    sectionRatio: [number, number, number] = [0.4, 0.3, 0.3]
+  ): string {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    
+    const [headRatio, midRatio, tailRatio] = sectionRatio;
+    const headLen = Math.floor(maxLength * headRatio);
+    const midLen = Math.floor(maxLength * midRatio);
+    const tailLen = Math.floor(maxLength * tailRatio);
+    
+    // 开头部分
+    const head = text.slice(0, headLen);
+    
+    // 中间部分（从文本中间位置开始）
+    const midStart = Math.floor((text.length - midLen) / 2);
+    const mid = text.slice(midStart, midStart + midLen);
+    
+    // 尾部部分
+    const tail = text.slice(-tailLen);
+    
+    // 用分隔符连接，便于 AI 理解
+    return `${head}\n\n... [省略 ${text.length - maxLength} 字符，以下为中间部分] ...\n\n${mid}\n\n... [以下为尾部] ...\n\n${tail}`;
+  }
+
+  /**
    * 简化内容，用于发送给 AI
    * @param maxHtmlLength 完整HTML的最大长度（默认30000字符）
+   * @param smartTruncateEnabled 是否启用智能截取（默认true）
    */
-  simplifyContent(content: PageContent, maxHtmlLength = 30000): SimplifiedContent {
+  simplifyContent(
+    content: PageContent, 
+    maxHtmlLength = 30000,
+    smartTruncateEnabled = true
+  ): SimplifiedContent {
+    // 处理完整页面 HTML
+    let html: string;
+    if (smartTruncateEnabled && content.bodyHtml.length > maxHtmlLength) {
+      html = this.smartTruncate(content.bodyHtml, maxHtmlLength);
+    } else {
+      html = content.bodyHtml.slice(0, maxHtmlLength);
+    }
+    
+    // 处理各区域 HTML
+    const maxSectionLength = 5000;
+    const sections = content.sections.map(s => ({
+      name: s.name,
+      selector: s.selector,
+      html: smartTruncateEnabled && s.html.length > maxSectionLength
+        ? this.smartTruncate(s.html, maxSectionLength, [0.5, 0.2, 0.3])
+        : s.html.slice(0, maxSectionLength)
+    }));
+    
+    // 处理示例文本
+    const maxSampleLength = 500;
+    const samples = {
+      ...content.samples,
+      sampleText: smartTruncateEnabled && content.samples.sampleText.length > maxSampleLength
+        ? this.smartTruncate(content.samples.sampleText, maxSampleLength, [0.5, 0.2, 0.3])
+        : content.samples.sampleText.slice(0, maxSampleLength)
+    };
+    
     return {
       url: content.url,
       title: content.title,
-      // 完整页面HTML（限制长度）
-      html: content.bodyHtml.slice(0, maxHtmlLength),
-      // 关键区域（每个区域限制长度）
-      sections: content.sections.map(s => ({
-        name: s.name,
-        selector: s.selector,
-        html: s.html.slice(0, 5000)
-      })),
+      html,
+      sections,
       features: content.features,
-      samples: content.samples,
+      samples,
     };
   }
 

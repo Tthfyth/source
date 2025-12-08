@@ -1,9 +1,15 @@
 // ============================================
-// Legado 书源完整类型定义
-// 参考: https://github.com/gedoor/legado
+// 书源类型定义
+// 支持 Legado 和 异次元 两种格式
 // ============================================
 
-// 书源类型枚举
+// 源格式枚举（用于区分 Legado 和 异次元）
+export enum SourceFormat {
+  Legado = 'legado',
+  Yiciyuan = 'yiciyuan',
+}
+
+// 书源类型枚举（Legado 格式）
 export enum BookSourceType {
   Text = 0, // 文本
   Audio = 1, // 音频
@@ -211,3 +217,133 @@ export interface ChapterItem {
 
 // 主题类型
 export type ThemeMode = 'light' | 'dark' | 'system';
+
+// ============================================
+// 异次元图源类型定义
+// 参考: https://www.yckceo.com/yiciyuan/tuyuan/
+// ============================================
+
+// 异次元图源主体定义
+export interface YiciyuanSource {
+  // ===== 基本信息 =====
+  bookSourceUrl: string;           // 源地址（主键）
+  bookSourceName: string;          // 源名称
+  bookSourceGroup?: string;        // 源分组
+  bookSourceType: string;          // 源类型（漫画/小说等）
+  sourceRemark?: string;           // 源备注
+  
+  // ===== 状态控制 =====
+  enable: boolean;                 // 是否启用
+  serialNumber?: number;           // 序号
+  weight?: number;                 // 权重
+  lastUpdateTime?: number;         // 最后更新时间
+  
+  // ===== 请求配置 =====
+  httpUserAgent?: string;          // User-Agent
+  bookDelayTime?: string;          // 延迟时间
+  bookSingleThread?: string;       // 单线程（是/否）
+  
+  // ===== 登录相关 =====
+  loginUrl?: string;               // 登录地址
+  loginUrlResult?: string;         // 登录结果
+  
+  // ===== 搜索规则 =====
+  ruleSearchUrl?: string;          // 搜索地址
+  ruleSearchUrlNext?: string;      // 搜索下一页
+  ruleSearchList?: string;         // 搜索列表规则
+  ruleSearchName?: string;         // 书名规则
+  ruleSearchAuthor?: string;       // 作者规则
+  ruleSearchKind?: string;         // 分类规则
+  ruleSearchLastChapter?: string;  // 最新章节规则
+  ruleSearchCoverUrl?: string;     // 封面规则
+  ruleSearchCoverDecoder?: string; // 封面解密
+  ruleSearchNoteUrl?: string;      // 详情地址规则
+  
+  // ===== 发现规则 =====
+  ruleFindUrl?: string;            // 发现地址（多行）
+  
+  // ===== 详情规则 =====
+  ruleBookUrlPattern?: string;     // URL匹配规则
+  ruleBookName?: string;           // 书名规则
+  ruleBookAuthor?: string;         // 作者规则
+  ruleBookKind?: string;           // 分类规则
+  ruleBookLastChapter?: string;    // 最新章节规则
+  ruleIntroduce?: string;          // 简介规则
+  ruleCoverUrl?: string;           // 封面规则
+  ruleCoverDecoder?: string;       // 封面解密
+  
+  // ===== 目录规则 =====
+  ruleChapterUrl?: string;         // 目录地址规则
+  ruleChapterUrlNext?: string;     // 目录下一页
+  ruleChapterList?: string;        // 章节列表规则
+  ruleChapterName?: string;        // 章节名称规则
+  ruleContentUrl?: string;         // 章节内容地址规则
+  ruleChapterId?: string;          // 章节ID规则
+  ruleChapterParentId?: string;    // 父章节ID
+  ruleChapterParentName?: string;  // 父章节名称
+  
+  // ===== 正文规则 =====
+  ruleBookContent?: string;        // 正文内容规则
+  ruleBookContentDecoder?: string; // 正文解密
+  ruleContentUrlNext?: string;     // 正文下一页
+}
+
+// 通用源类型（可以是 Legado 或 异次元）
+export type AnySource = BookSource | YiciyuanSource;
+
+// 源格式检测函数类型
+export type SourceFormatDetector = (source: any) => SourceFormat;
+
+// 检测源格式的工具函数
+export function detectSourceFormat(source: any): SourceFormat {
+  if (!source) return SourceFormat.Legado;
+  
+  // 异次元图源特有字段
+  const yiciyuanFields = [
+    'ruleSearchUrl',
+    'ruleSearchList', 
+    'ruleSearchName',
+    'ruleSearchNoteUrl',
+    'ruleBookContent',
+    'ruleFindUrl',
+    'ruleChapterUrl',
+    'ruleIntroduce',
+    'bookSingleThread',
+    'httpUserAgent',
+  ];
+  
+  // Legado 特有字段
+  const legadoFields = [
+    'ruleSearch',
+    'ruleExplore', 
+    'ruleBookInfo',
+    'ruleToc',
+    'ruleContent',
+    'searchUrl',
+    'exploreUrl',
+  ];
+  
+  // 统计匹配的字段数
+  let yiciyuanCount = 0;
+  let legadoCount = 0;
+  
+  for (const field of yiciyuanFields) {
+    if (field in source && source[field] !== undefined && source[field] !== '') {
+      yiciyuanCount++;
+    }
+  }
+  
+  for (const field of legadoFields) {
+    if (field in source && source[field] !== undefined && source[field] !== '') {
+      legadoCount++;
+    }
+  }
+  
+  // 根据匹配数量判断格式
+  return yiciyuanCount > legadoCount ? SourceFormat.Yiciyuan : SourceFormat.Legado;
+}
+
+// 获取源格式的显示名称
+export function getSourceFormatLabel(format: SourceFormat): string {
+  return format === SourceFormat.Yiciyuan ? '异次元' : 'Legado';
+}
