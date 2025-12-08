@@ -5,11 +5,6 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g., 1.0.0)'
-        required: false
-        default: ''
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -26,7 +21,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,21 +30,24 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Build application
-        run: pnpm run build
+      - name: Build and Package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --win --publish never
 
-      - name: Package for Windows
-        run: pnpm exec electron-builder --win --publish never
+      - name: List build output
+        run: Get-ChildItem -Path release/build -Recurse | Select-Object FullName, Length
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: |
-            release/build/*.exe
-            release/build/*.exe.blockmap
+          path: release/build/*.exe
+          if-no-files-found: error
           retention-days: 5
 
   # 构建 macOS 版本
@@ -63,7 +61,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -72,20 +70,17 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Build application
-        run: pnpm run build
-
-      - name: Package for macOS
+      - name: Build and Package
         env:
-          # macOS 签名（可选）
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_ID_PASS }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec electron-builder --mac --publish never
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --mac --publish never
+
+      - name: List build output
+        run: ls -la release/build/
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -93,8 +88,8 @@ jobs:
           name: macos-build
           path: |
             release/build/*.dmg
-            release/build/*.dmg.blockmap
             release/build/*.zip
+          if-no-files-found: error
           retention-days: 5
 
   # 构建 Linux 版本
@@ -108,7 +103,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v2
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -117,13 +112,15 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
-      - name: Build application
-        run: pnpm run build
+      - name: Build and Package
+        run: |
+          pnpm run build
+          pnpm exec electron-builder --linux --publish never
 
-      - name: Package for Linux
-        run: pnpm exec electron-builder --linux --publish never
+      - name: List build output
+        run: ls -la release/build/
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -132,7 +129,7 @@ jobs:
           path: |
             release/build/*.AppImage
             release/build/*.deb
-            release/build/*.rpm
+          if-no-files-found: error
           retention-days: 5
 
   # 发布 Release
@@ -141,10 +138,10 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     
+    permissions:
+      contents: write
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
