@@ -19,6 +19,7 @@ import {
   SegmentedControl,
   Tooltip,
   Modal,
+  Select,
   useMantineColorScheme,
 } from '@mantine/core';
 import {
@@ -50,9 +51,14 @@ import {
   IconLayoutColumns,
   IconPlayerSkipBack,
   IconPlayerSkipForward,
+  IconSearch,
+  IconCode,
+  IconLogin,
+  IconUser,
 } from '@tabler/icons-react';
 import { useBookSourceStore } from '../stores/bookSourceStore';
 import type { BookItem, ChapterItem, TestMode } from '../types';
+import { SourceLoginDialog } from './SourceLoginDialog';
 
 const testModeOptions: { label: string; value: TestMode }[] = [
   { label: '搜索', value: 'search' },
@@ -81,7 +87,170 @@ export function DebugPanel() {
     setAiAnalysisEnabled,
     chapterList,
     currentChapterIndex,
+    sources,
+    activeSourceId,
+    sourceCode,
   } = useBookSourceStore();
+
+  // 发现分类状态（支持 JS 动态规则，需要后端解析）
+  const [exploreCategories, setExploreCategories] = useState<
+    Array<{ label: string; value: string }> | Array<{ group: string; items: { label: string; value: string }[] }>
+  >([]);
+  const [exploreCategoryCount, setExploreCategoryCount] = useState(0);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+
+  // 解析发现分类列表（支持 JS 动态规则）
+  useEffect(() => {
+    const parseCategories = async () => {
+      // 获取当前书源
+      let currentSource: any = null;
+      try {
+        if (sourceCode) {
+          currentSource = JSON.parse(sourceCode);
+        }
+      } catch {
+        currentSource = sources.find(s => s.bookSourceUrl === activeSourceId);
+      }
+
+      if (!currentSource) {
+        setExploreCategories([]);
+        setExploreCategoryCount(0);
+        return;
+      }
+
+      const exploreUrl = currentSource.exploreUrl || currentSource.ruleFindUrl || '';
+      if (!exploreUrl) {
+        setExploreCategories([]);
+        setExploreCategoryCount(0);
+        return;
+      }
+
+      // 检查是否是 JS 动态规则
+      const isJsRule = exploreUrl.trim().startsWith('<js>') || 
+                       exploreUrl.trim().toLowerCase().startsWith('@js:');
+
+      if (isJsRule) {
+        // JS 动态规则，调用后端 API 解析
+        setIsLoadingCategories(true);
+        try {
+          const result = await window.debugApi?.parseExploreCategories(currentSource);
+          if (result?.success && result?.categories) {
+            // 去重：使用 Set 记录已出现的 value
+            const seenValues = new Set<string>();
+            const items = result.categories
+              .map((cat: any) => ({
+                label: cat.title,
+                value: `${cat.title}::${cat.url}`,
+                group: cat.group || '默认',
+              }))
+              .filter((item: { label: string; value: string; group: string }) => {
+                if (seenValues.has(item.value)) {
+                  return false;
+                }
+                seenValues.add(item.value);
+                return true;
+              });
+            
+            // 转换为 Mantine Select 格式
+            const formatted = formatCategoriesToSelect(items);
+            setExploreCategories(formatted.data);
+            setExploreCategoryCount(formatted.count);
+          } else {
+            setExploreCategories([]);
+            setExploreCategoryCount(0);
+          }
+        } catch (error) {
+          console.error('Failed to parse explore categories:', error);
+          setExploreCategories([]);
+          setExploreCategoryCount(0);
+        } finally {
+          setIsLoadingCategories(false);
+        }
+      } else {
+        // 静态规则，前端直接解析
+        const items: { label: string; value: string; group: string }[] = [];
+        let currentGroup = '默认';
+
+        // 尝试 JSON 格式
+        if (exploreUrl.trim().startsWith('[')) {
+          try {
+            const jsonData = JSON.parse(exploreUrl);
+            if (Array.isArray(jsonData)) {
+              jsonData.forEach((item: any) => {
+                if (item.title) {
+                  if (item.url) {
+                    items.push({ 
+                      label: item.title, 
+                      value: `${item.title}::${item.url}`,
+                      group: currentGroup
+                    });
+                  } else {
+                    currentGroup = item.title;
+                  }
+                }
+              });
+            }
+          } catch {
+            // 不是有效 JSON
+          }
+        }
+
+        // 文本格式解析
+        if (items.length === 0) {
+          currentGroup = '默认';
+          const lines = exploreUrl.split(/&&|\n/).filter((l: string) => l.trim());
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.includes('::')) {
+              const separatorIndex = trimmed.indexOf('::');
+              const name = trimmed.substring(0, separatorIndex).trim();
+              const url = trimmed.substring(separatorIndex + 2).trim();
+              if (name && url) {
+                items.push({ label: name, value: trimmed, group: currentGroup });
+              } else if (name && !url) {
+                currentGroup = name;
+              }
+            } else if (trimmed.startsWith('http')) {
+              items.push({ label: trimmed, value: trimmed, group: currentGroup });
+            } else if (trimmed) {
+              currentGroup = trimmed;
+            }
+          }
+        }
+
+        const formatted = formatCategoriesToSelect(items);
+        setExploreCategories(formatted.data);
+        setExploreCategoryCount(formatted.count);
+      }
+    };
+
+    parseCategories();
+  }, [sourceCode, sources, activeSourceId]);
+
+  // 辅助函数：转换分类为 Mantine Select 格式
+  const formatCategoriesToSelect = (items: { label: string; value: string; group: string }[]) => {
+    const groupMap = new Map<string, { label: string; value: string }[]>();
+    for (const item of items) {
+      if (!groupMap.has(item.group)) {
+        groupMap.set(item.group, []);
+      }
+      groupMap.get(item.group)!.push({ label: item.label, value: item.value });
+    }
+
+    const count = items.length;
+
+    // 如果只有一个分组且是默认分组，返回扁平数组
+    if (groupMap.size === 1 && groupMap.has('默认')) {
+      return { data: groupMap.get('默认')!, count };
+    }
+
+    // 返回分组格式
+    const result: Array<{ group: string; items: { label: string; value: string }[] }> = [];
+    for (const [group, groupItems] of groupMap) {
+      result.push({ group, items: groupItems });
+    }
+    return { data: result, count };
+  };
 
   const { colorScheme } = useMantineColorScheme();
   const [showConfig, setShowConfig] = useState(false);
@@ -93,6 +262,53 @@ export function DebugPanel() {
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal'); // 横向翻页 / 纵向条漫
+
+  // 原始响应搜索和格式化状态
+  const [rawSearchKeyword, setRawSearchKeyword] = useState('');
+  const [isRawFormatted, setIsRawFormatted] = useState(false);
+
+  // 登录对话框状态
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+  const [loginStatus, setLoginStatus] = useState<{
+    hasLoginUrl: boolean;
+    isLoggedIn: boolean;
+  }>({ hasLoginUrl: false, isLoggedIn: false });
+
+  // 获取当前书源对象
+  const currentSource = useMemo(() => {
+    try {
+      if (sourceCode) {
+        return JSON.parse(sourceCode);
+      }
+    } catch {
+      // ignore
+    }
+    return sources.find(s => s.bookSourceUrl === activeSourceId);
+  }, [sourceCode, sources, activeSourceId]);
+
+  // 检查登录状态
+  useEffect(() => {
+    const checkLogin = async () => {
+      if (!currentSource) {
+        setLoginStatus({ hasLoginUrl: false, isLoggedIn: false });
+        return;
+      }
+      
+      try {
+        const result = await window.debugApi?.checkLoginStatus(currentSource);
+        if (result?.success) {
+          setLoginStatus({
+            hasLoginUrl: result.hasLoginUrl ?? false,
+            isLoggedIn: result.isLoggedIn ?? false,
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+    
+    checkLogin();
+  }, [currentSource]);
 
   // 可视化数据
   const visualData = useMemo(() => {
@@ -265,6 +481,19 @@ export function DebugPanel() {
       >
         <Text size="sm" fw={600}>规则测试器</Text>
         <Group gap="xs">
+          {/* 登录按钮 - 仅当书源配置了 loginUrl 时显示 */}
+          {loginStatus.hasLoginUrl && (
+            <Tooltip label={loginStatus.isLoggedIn ? '已登录，点击管理' : '点击登录'}>
+              <ActionIcon
+                variant={loginStatus.isLoggedIn ? 'filled' : 'light'}
+                color={loginStatus.isLoggedIn ? 'green' : 'blue'}
+                size="sm"
+                onClick={() => setLoginDialogOpen(true)}
+              >
+                {loginStatus.isLoggedIn ? <IconUser size={14} /> : <IconLogin size={14} />}
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip label={aiAnalysisEnabled ? "开启后，AI对话将附加测试结果数据" : "关闭状态"}>
             <Group gap={4}>
               <IconSparkles size={14} color={aiAnalysisEnabled ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-dimmed)'} />
@@ -311,20 +540,38 @@ export function DebugPanel() {
           {/* URL/关键词输入 */}
           <Stack gap="xs">
             <Group gap="xs">
-              <TextInput
-                placeholder={testMode === 'search' ? '输入搜索关键词...' : testMode === 'explore' ? '选择发现分类...' : '输入URL...'}
-                value={testInput}
-                onChange={(e) => setTestInput(e.currentTarget.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleTest()}
-                style={{ flex: 1 }}
-                rightSection={
-                  testHistory.length > 0 && (
-                    <ActionIcon variant="subtle" size="sm" onClick={() => setShowHistory(!showHistory)}>
-                      <IconHistory size={16} />
-                    </ActionIcon>
-                  )
-                }
-              />
+              {testMode === 'explore' && (exploreCategoryCount > 0 || isLoadingCategories) ? (
+                // 发现模式：显示下拉框选择分类（支持分组）
+                <Select
+                  placeholder={isLoadingCategories ? "正在加载分类..." : "选择发现分类..."}
+                  data={exploreCategories}
+                  value={testInput || null}
+                  onChange={(value) => setTestInput(value || '')}
+                  searchable
+                  clearable
+                  disabled={isLoadingCategories}
+                  style={{ flex: 1 }}
+                  nothingFoundMessage="无匹配分类"
+                  leftSection={isLoadingCategories ? <Loader size={14} /> : <IconCompass size={16} />}
+                  maxDropdownHeight={300}
+                />
+              ) : (
+                // 其他模式：显示文本输入框
+                <TextInput
+                  placeholder={testMode === 'search' ? '输入搜索关键词...' : testMode === 'explore' ? '输入发现URL（未配置分类或JS动态规则）...' : '输入URL...'}
+                  value={testInput}
+                  onChange={(e) => setTestInput(e.currentTarget.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleTest()}
+                  style={{ flex: 1 }}
+                  rightSection={
+                    testHistory.length > 0 && (
+                      <ActionIcon variant="subtle" size="sm" onClick={() => setShowHistory(!showHistory)}>
+                        <IconHistory size={16} />
+                      </ActionIcon>
+                    )
+                  }
+                />
+              )}
               <Button
                 onClick={handleTest}
                 loading={isLoading}
@@ -333,6 +580,20 @@ export function DebugPanel() {
                 {isLoading ? '停止' : '测试'}
               </Button>
             </Group>
+
+            {/* 发现模式下显示分类数量提示 */}
+            {testMode === 'explore' && (isLoadingCategories || exploreCategoryCount > 0) && (
+              <Text size="xs" c="dimmed">
+                {isLoadingCategories 
+                  ? '正在解析 JS 动态发现规则...' 
+                  : `已配置 ${exploreCategoryCount} 个发现分类${
+                      exploreCategories.length > 0 && 'group' in exploreCategories[0] 
+                        ? `（${exploreCategories.length} 个分组）` 
+                        : ''
+                    }`
+                }
+              </Text>
+            )}
 
             {/* 历史记录下拉 */}
             <Collapse in={showHistory && testHistory.length > 0}>
@@ -490,24 +751,55 @@ export function DebugPanel() {
               </Box>
             ) : testResult ? (
               <Tabs value={activeResultTab} onChange={setActiveResultTab}>
-                <Tabs.List>
-                  <Tabs.Tab value="visual">可视化</Tabs.Tab>
-                  <Tabs.Tab value="parsed">解析结果</Tabs.Tab>
-                  <Tabs.Tab value="raw">原始响应</Tabs.Tab>
-                </Tabs.List>
+                <Group justify="space-between" align="center">
+                  <Tabs.List>
+                    <Tabs.Tab value="visual">可视化</Tabs.Tab>
+                    <Tabs.Tab value="parsed">解析结果</Tabs.Tab>
+                    <Tabs.Tab value="raw">原始响应</Tabs.Tab>
+                  </Tabs.List>
+                  {/* 原始响应搜索和格式化按钮 - 只在选中原始响应 Tab 时显示 */}
+                  {activeResultTab === 'raw' && (
+                    <Group gap="xs">
+                      <TextInput
+                        placeholder="搜索..."
+                        size="xs"
+                        value={rawSearchKeyword}
+                        onChange={(e) => setRawSearchKeyword(e.currentTarget.value)}
+                        leftSection={<IconSearch size={14} />}
+                        style={{ flex: 1, minWidth: 300, maxWidth: 500 }}
+                        rightSection={
+                          rawSearchKeyword && (
+                            <ActionIcon variant="subtle" size="xs" onClick={() => setRawSearchKeyword('')}>
+                              <IconX size={12} />
+                            </ActionIcon>
+                          )
+                        }
+                      />
+                      <Tooltip label={isRawFormatted ? '显示原始' : '格式化'}>
+                        <ActionIcon 
+                          variant={isRawFormatted ? 'filled' : 'light'} 
+                          size="sm"
+                          onClick={() => setIsRawFormatted(!isRawFormatted)}
+                        >
+                          <IconCode size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  )}
+                </Group>
 
-                <Tabs.Panel value="visual" pt="sm">
+                <Tabs.Panel value="visual" pt="sm" style={{ height: 'calc(100vh - 400px)', minHeight: 300 }}>
                   {/* 书籍列表 */}
                   {visualData.books.length > 0 && (
-                    <Paper withBorder>
-                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}` })}>
+                    <Paper withBorder style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                      <Group px="sm" py="xs" style={(theme) => ({ borderBottom: `1px solid ${colorScheme === 'dark' ? theme.colors.dark[4] : theme.colors.gray[3]}`, flexShrink: 0 })}>
                         {testMode === 'explore' ? <IconCompass size={16} /> : <IconWorld size={16} />}
                         <Text size="sm" fw={500}>
                           {testMode === 'explore' ? '发现结果' : '搜索结果'} ({visualData.books.length}本)
                         </Text>
                         <Text size="xs" c="dimmed" ml="auto">点击查看详情</Text>
                       </Group>
-                      <ScrollArea.Autosize mah={240}>
+                      <ScrollArea style={{ flex: 1 }}>
                         <Stack gap={0}>
                           {visualData.books.map((book, index) => (
                             <Box
@@ -540,7 +832,7 @@ export function DebugPanel() {
                             </Box>
                           ))}
                         </Stack>
-                      </ScrollArea.Autosize>
+                      </ScrollArea>
                     </Paper>
                   )}
 
@@ -742,12 +1034,47 @@ export function DebugPanel() {
                   )}
                 </Tabs.Panel>
 
-                <Tabs.Panel value="raw" pt="sm">
-                  <ScrollArea.Autosize mah={240}>
+                <Tabs.Panel value="raw" pt="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <ScrollArea style={{ flex: 1 }}>
                     <Paper p="sm" bg={colorScheme === 'dark' ? 'dark.6' : 'gray.0'} style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                      {testResult.rawResponse || '无响应内容'}
+                      {(() => {
+                        const rawContent = testResult.rawResponse || '无响应内容';
+                        
+                        // 格式化处理
+                        let displayContent = rawContent;
+                        if (isRawFormatted && rawContent !== '无响应内容') {
+                          try {
+                            // 尝试 JSON 格式化
+                            const parsed = JSON.parse(rawContent);
+                            displayContent = JSON.stringify(parsed, null, 2);
+                          } catch {
+                            // 尝试 XML/HTML 格式化
+                            if (rawContent.trim().startsWith('<')) {
+                              displayContent = rawContent
+                                .replace(/></g, '>\n<')
+                                .replace(/>\s+</g, '>\n<');
+                            }
+                          }
+                        }
+                        
+                        // 搜索高亮处理
+                        if (rawSearchKeyword.trim()) {
+                          const keyword = rawSearchKeyword.trim();
+                          const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                          const parts = displayContent.split(regex);
+                          return parts.map((part, index) => 
+                            regex.test(part) ? (
+                              <span key={index} style={{ backgroundColor: 'var(--mantine-color-yellow-4)', color: 'black', padding: '0 2px', borderRadius: 2 }}>
+                                {part}
+                              </span>
+                            ) : part
+                          );
+                        }
+                        
+                        return displayContent;
+                      })()}
                     </Paper>
-                  </ScrollArea.Autosize>
+                  </ScrollArea>
                 </Tabs.Panel>
               </Tabs>
             ) : (
@@ -1044,6 +1371,17 @@ export function DebugPanel() {
           </Box>
         )}
       </Modal>
+
+      {/* 登录对话框 */}
+      <SourceLoginDialog
+        opened={loginDialogOpen}
+        onClose={() => setLoginDialogOpen(false)}
+        source={currentSource}
+        onLoginSuccess={() => {
+          // 刷新登录状态
+          setLoginStatus(prev => ({ ...prev, isLoggedIn: true }));
+        }}
+      />
     </Box>
   );
 }

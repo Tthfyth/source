@@ -1,5 +1,29 @@
-export { SourceDebugger } from './source-debugger';
-export type { BookSource, DebugResult, DebugLog, ParsedBook, ParsedChapter } from './source-debugger';
+export { 
+  SourceDebugger, 
+  parseExploreUrl,
+  // 登录相关
+  parseLoginUi,
+  getLoginJs,
+  getLoginInfo,
+  putLoginInfo,
+  removeLoginInfo,
+  getLoginHeader,
+  putLoginHeader,
+  removeLoginHeader,
+  executeLogin,
+  executeButtonAction,
+  checkLoginStatus,
+} from './source-debugger';
+export type { 
+  BookSource, 
+  DebugResult, 
+  DebugLog, 
+  ParsedBook, 
+  ParsedChapter, 
+  ExploreCategory,
+  LoginUiItem,
+  LoginResult,
+} from './source-debugger';
 export { YiciyuanDebugger, isYiciyuanSource } from './yiciyuan-debugger';
 export type { YiciyuanSource } from './yiciyuan-debugger';
 export { httpRequest, parseHeaders } from './http-client';

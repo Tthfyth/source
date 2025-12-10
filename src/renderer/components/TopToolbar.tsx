@@ -30,6 +30,7 @@ import { useBookSourceStore } from '../stores/bookSourceStore';
 import { SourceFormat, detectSourceFormat, getSourceFormatLabel } from '../types';
 import { useAppTour } from './AppTour';
 import { convertSource } from '../utils/sourceConverter';
+import { SettingsModal } from './SettingsModal';
 
 interface TopToolbarProps {
   isLeftCollapsed: boolean;
@@ -66,6 +67,7 @@ export function TopToolbar({
 
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
   const { resetTour } = useAppTour();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const activeSource = sources.find(
     (s) => s.bookSourceUrl === activeSourceId
@@ -414,11 +416,14 @@ export function TopToolbar({
         </Tooltip>
 
         <Tooltip label="设置" position="bottom">
-          <ActionIcon variant="subtle" size="lg">
+          <ActionIcon variant="subtle" size="lg" onClick={() => setSettingsOpen(true)}>
             <IconSettings size={18} />
           </ActionIcon>
         </Tooltip>
       </Group>
+
+      {/* 设置模态框 */}
+      <SettingsModal opened={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Group>
   );
 }

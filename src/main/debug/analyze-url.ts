@@ -384,17 +384,11 @@ export class AnalyzeUrl {
     );
     
     // 3. 转换 E4X XML 字面量 (简单处理，转为字符串)
-    // <xml>...</xml> -> '<xml>...</xml>'
-    result = result.replace(
-      /(<\w+[^>]*>[\s\S]*?<\/\w+>)/g,
-      (match) => {
-        // 检查是否在字符串内
-        if (match.startsWith("'") || match.startsWith('"') || match.startsWith('`')) {
-          return match;
-        }
-        return `'${match.replace(/'/g, "\\'")}'`;
-      }
-    );
+    // 注意：只转换独立的 XML 字面量，不转换字符串中的 XML
+    // 这个转换很容易出错，所以只在非常明确的情况下才转换
+    // 例如: var x = <xml>...</xml> 但不转换 var x = '<xml>...</xml>'
+    // 暂时禁用此转换，因为大多数书源不使用 E4X
+    // result = result.replace(...);
     
     // 4. 转换 Java 风格的数组声明
     // new java.lang.String[] -> []
@@ -437,6 +431,7 @@ export class AnalyzeUrl {
       // jsLib 可能是 JSON 对象（指向远程 JS 文件的 URL）或直接的 JS 代码
       const jsLib = this.variables['_jsLib'];
       if (jsLib) {
+        console.log('[AnalyzeUrl] Loading jsLib, length:', jsLib.length);
         try {
           // 检查是否是 JSON 对象
           if (jsLib.trim().startsWith('{') && jsLib.trim().endsWith('}')) {
@@ -464,18 +459,24 @@ export class AnalyzeUrl {
               }
             } catch (jsonError) {
               // 不是有效的 JSON，作为普通 JS 代码执行
+              console.log('[AnalyzeUrl] jsLib is not JSON, executing as JS code');
               const convertedJsLib = this.convertRhinoToES6(jsLib);
               const jsLibScript = new vm.Script(convertedJsLib);
               jsLibScript.runInContext(vmContext, { timeout: 5000 });
+              console.log('[AnalyzeUrl] jsLib executed successfully');
             }
           } else {
             // 直接作为 JS 代码执行
+            console.log('[AnalyzeUrl] Executing jsLib as JS code directly');
             const convertedJsLib = this.convertRhinoToES6(jsLib);
             const jsLibScript = new vm.Script(convertedJsLib);
             jsLibScript.runInContext(vmContext, { timeout: 5000 });
+            console.log('[AnalyzeUrl] jsLib executed successfully');
           }
         } catch (e) {
           console.error('[AnalyzeUrl] jsLib execution error:', e);
+          // jsLib 执行失败时，不继续执行主代码
+          throw e;
         }
       }
       
@@ -488,6 +489,88 @@ export class AnalyzeUrl {
   }
 
   /**
+   * 执行 JS 获取发现分类 - 公开方法供外部调用
+   * 用于解析 exploreUrl 中的 <js>...</js> 或 @js:... 规则
+   */
+  evalJsForExplore(jsCode: string): string {
+    try {
+      const result = this.evalJS(jsCode, null);
+      if (result === null || result === undefined) return '';
+      if (typeof result === 'string') return result;
+      if (typeof result === 'object') return JSON.stringify(result);
+      return String(result);
+    } catch (error) {
+      console.error('[AnalyzeUrl] evalJsForExplore error:', error);
+      return '';
+    }
+  }
+
+  /**
+   * 执行 JS 并传入登录数据
+   * 用于登录功能，参考 Legado BaseSource.evalJS()
+   */
+  evalJsWithLoginData(jsCode: string, loginData: Record<string, string>): any {
+    try {
+      // 转换 Rhino JS 语法为标准 ES6
+      const convertedCode = this.convertRhinoToES6(jsCode);
+      
+      // 创建沙箱环境，传入登录数据
+      const sandbox = this.createJsSandbox(loginData);
+      // 额外注入登录数据作为 result
+      sandbox.result = loginData;
+      
+      const vmContext = vm.createContext(sandbox);
+      
+      // 加载 jsLib
+      const jsLib = this.variables['_jsLib'];
+      if (jsLib) {
+        try {
+          if (jsLib.trim().startsWith('{') && jsLib.trim().endsWith('}')) {
+            // JSON 格式的 jsLib（远程 JS 文件）
+            try {
+              const jsMap = JSON.parse(jsLib);
+              for (const [, url] of Object.entries(jsMap)) {
+                if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+                  const cacheKey = `_jsLib_${url}`;
+                  let jsCode = CacheManager.get(cacheKey);
+                  if (!jsCode) {
+                    const response = syncHttpRequest(url);
+                    if (response.body) {
+                      jsCode = response.body;
+                      CacheManager.put(cacheKey, jsCode, 86400);
+                    }
+                  }
+                  if (jsCode) {
+                    const convertedJsLib = this.convertRhinoToES6(jsCode);
+                    const jsLibScript = new vm.Script(convertedJsLib);
+                    jsLibScript.runInContext(vmContext, { timeout: 10000 });
+                  }
+                }
+              }
+            } catch {
+              const convertedJsLib = this.convertRhinoToES6(jsLib);
+              const jsLibScript = new vm.Script(convertedJsLib);
+              jsLibScript.runInContext(vmContext, { timeout: 5000 });
+            }
+          } else {
+            const convertedJsLib = this.convertRhinoToES6(jsLib);
+            const jsLibScript = new vm.Script(convertedJsLib);
+            jsLibScript.runInContext(vmContext, { timeout: 5000 });
+          }
+        } catch (e) {
+          console.error('[AnalyzeUrl] jsLib execution error in login:', e);
+        }
+      }
+      
+      const script = new vm.Script(convertedCode);
+      return script.runInContext(vmContext, { timeout: 30000 }); // 登录可能需要更长时间
+    } catch (error) {
+      console.error('[AnalyzeUrl] evalJsWithLoginData error:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 创建 JS 沙箱环境 - 提供 Legado 兼容的 java 对象
    * 参考 Legado JsExtensions.kt
    */
@@ -495,12 +578,16 @@ export class AnalyzeUrl {
     const self = this;
 
     // cookie 对象 - 使用持久化的 CookieStore
+    // 参考 Legado JsExtensions.kt 中的 cookie 对象
     const cookie = {
       getCookie: (tag: string, key?: string) => {
         if (key) {
           return CookieStore.getKey(tag, key);
         }
         return CookieStore.getCookie(tag);
+      },
+      getKey: (tag: string, key: string) => {
+        return CookieStore.getKey(tag, key);
       },
       setCookie: (tag: string, cookie: string) => {
         CookieStore.setCookie(tag, cookie);

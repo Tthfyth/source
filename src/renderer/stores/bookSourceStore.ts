@@ -251,6 +251,13 @@ export const useBookSourceStore = create<BookSourceState>()(
       activeSourceId: url,
       sourceCode: source ? JSON.stringify(source, null, 2) : '',
       isModified: false,
+      // 切换书源时重置测试器状态
+      testMode: 'search',
+      testInput: '',
+      testResult: null,
+      debugLogs: [],
+      chapterList: [],
+      currentChapterIndex: -1,
     });
   },
 
@@ -713,9 +720,50 @@ declare global {
     debugApi?: {
       search: (source: AnySource, keyword: string) => Promise<unknown>;
       explore: (source: AnySource, exploreUrl: string) => Promise<unknown>;
+      parseExploreCategories: (source: AnySource) => Promise<{
+        success: boolean;
+        categories?: Array<{ title: string; url: string; group: string; style?: any }>;
+        error?: string;
+      }>;
       bookInfo: (source: AnySource, bookUrl: string) => Promise<unknown>;
       toc: (source: AnySource, tocUrl: string) => Promise<unknown>;
       content: (source: AnySource, contentUrl: string) => Promise<unknown>;
+      // 登录相关
+      parseLoginUi: (loginUi: string) => Promise<{
+        success: boolean;
+        items?: Array<{ name: string; type: string; action?: string }>;
+        error?: string;
+      }>;
+      checkLoginStatus: (source: AnySource) => Promise<{
+        success: boolean;
+        hasLoginUrl?: boolean;
+        hasLoginUi?: boolean;
+        isLoggedIn?: boolean;
+        loginInfo?: Record<string, string>;
+        error?: string;
+      }>;
+      executeLogin: (source: AnySource, loginData: Record<string, string>) => Promise<{
+        success: boolean;
+        message?: string;
+        loginHeader?: Record<string, string>;
+      }>;
+      executeButtonAction: (source: AnySource, action: string, loginData: Record<string, string>) => Promise<{
+        success: boolean;
+        message?: string;
+        result?: any;
+      }>;
+      getLoginInfo: (sourceKey: string) => Promise<{
+        success: boolean;
+        info?: Record<string, string>;
+        error?: string;
+      }>;
+      removeLoginInfo: (sourceKey: string) => Promise<{ success: boolean; error?: string }>;
+      getLoginHeader: (sourceKey: string) => Promise<{
+        success: boolean;
+        header?: Record<string, string>;
+        error?: string;
+      }>;
+      removeLoginHeader: (sourceKey: string) => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

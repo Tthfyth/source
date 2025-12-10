@@ -1684,4 +1684,442 @@ export class SourceDebugger {
   }
 }
 
+/**
+ * 解析发现分类列表
+ * 支持 Legado 的多种格式：
+ * 1. 文本格式：分类名::URL（用 && 或换行分隔）
+ * 2. JSON 格式：[{"title":"分类","url":"..."}]
+ * 3. JS 动态格式：<js>...</js> 或 @js:...
+ * 4. 分组：没有 URL 的项作为分组标题
+ */
+export interface ExploreCategory {
+  title: string;
+  url: string;
+  group: string;
+  style?: any;
+}
+
+export async function parseExploreUrl(
+  source: BookSource,
+  variables?: Record<string, any>
+): Promise<ExploreCategory[]> {
+  const exploreUrl = source.exploreUrl || (source as any).ruleFindUrl || '';
+  if (!exploreUrl) return [];
+
+  let ruleStr = exploreUrl;
+
+  // 处理 JS 动态规则
+  if (exploreUrl.trim().startsWith('<js>') || exploreUrl.trim().toLowerCase().startsWith('@js:')) {
+    console.log('[parseExploreUrl] Detected JS dynamic rule');
+    console.log('[parseExploreUrl] jsLib available:', !!source.jsLib);
+    try {
+      const analyzeUrl = new AnalyzeUrl(source.bookSourceUrl, {
+        source,
+        variables: {
+          ...variables,
+          _jsLib: source.jsLib,
+        },
+      });
+
+      // 提取 JS 代码 - 参考 Legado BookSourceExtensions.kt
+      let jsCode: string;
+      if (exploreUrl.trim().startsWith('<js>')) {
+        // <js>...</js> 格式：取 <js> 到最后一个 < 之间的内容
+        const startIndex = exploreUrl.indexOf('>') + 1;
+        const endIndex = exploreUrl.lastIndexOf('<');
+        jsCode = exploreUrl.substring(startIndex, endIndex > startIndex ? endIndex : exploreUrl.length);
+      } else {
+        // @js: 格式：取 @js: 之后的所有内容
+        jsCode = exploreUrl.substring(4);
+      }
+      
+      console.log('[parseExploreUrl] JS code length:', jsCode.length);
+
+      // 执行 JS
+      ruleStr = analyzeUrl.evalJsForExplore(jsCode);
+      console.log('[parseExploreUrl] JS result length:', ruleStr?.length || 0);
+      if (!ruleStr) {
+        console.log('[parseExploreUrl] JS returned empty result');
+        return [];
+      }
+    } catch (error) {
+      console.error('[parseExploreUrl] JS execution error:', error);
+      return [];
+    }
+  }
+
+  const categories: ExploreCategory[] = [];
+  let currentGroup = '默认';
+
+  // 尝试 JSON 格式
+  if (ruleStr.trim().startsWith('[')) {
+    try {
+      const jsonData = JSON.parse(ruleStr);
+      if (Array.isArray(jsonData)) {
+        for (const item of jsonData) {
+          if (item.title) {
+            if (item.url) {
+              categories.push({
+                title: item.title,
+                url: item.url,
+                group: currentGroup,
+                style: item.style,
+              });
+            } else {
+              // 没有 URL，是分组标题
+              currentGroup = item.title;
+            }
+          }
+        }
+      }
+      return categories;
+    } catch {
+      // 不是有效 JSON，继续尝试文本格式
+    }
+  }
+
+  // 文本格式解析（支持 && 和换行分隔）
+  const lines = ruleStr.split(/&&|\n/).filter((l: string) => l.trim());
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.includes('::')) {
+      const separatorIndex = trimmed.indexOf('::');
+      const name = trimmed.substring(0, separatorIndex).trim();
+      const url = trimmed.substring(separatorIndex + 2).trim();
+      if (name && url) {
+        categories.push({
+          title: name,
+          url: url,
+          group: currentGroup,
+        });
+      } else if (name && !url) {
+        // 只有名称没有 URL，是分组标题
+        currentGroup = name;
+      }
+    } else if (trimmed.startsWith('http')) {
+      // 纯 URL
+      categories.push({
+        title: trimmed,
+        url: trimmed,
+        group: currentGroup,
+      });
+    } else if (trimmed) {
+      // 纯文本，作为分组标题
+      currentGroup = trimmed;
+    }
+  }
+
+  return categories;
+}
+
+// ============================================
+// 登录功能实现
+// 参考 Legado BaseSource.kt
+// ============================================
+
+/**
+ * 登录 UI 配置项
+ */
+export interface LoginUiItem {
+  name: string;
+  type: 'text' | 'password' | 'button';
+  action?: string; // 按钮动作（URL 或 JS）
+}
+
+/**
+ * 登录结果
+ */
+export interface LoginResult {
+  success: boolean;
+  message?: string;
+  loginHeader?: Record<string, string>;
+}
+
+// 登录信息存储（内存 + 持久化）
+const loginInfoStore = new Map<string, Record<string, string>>();
+const loginHeaderStore = new Map<string, Record<string, string>>();
+
+/**
+ * 解析 loginUi JSON
+ * 支持非标准 JSON（单引号）
+ */
+export function parseLoginUi(loginUi?: string): LoginUiItem[] {
+  if (!loginUi) return [];
+  try {
+    // 尝试标准 JSON 解析
+    let items: any[];
+    try {
+      items = JSON.parse(loginUi);
+    } catch {
+      // 如果失败，尝试修复非标准 JSON
+      // 使用更智能的方式处理单引号
+      let fixedJson = loginUi;
+      
+      // 1. 先将已转义的单引号临时替换
+      fixedJson = fixedJson.replace(/\\'/g, '___ESCAPED_QUOTE___');
+      
+      // 2. 将属性名的单引号替换为双引号: 'name': -> "name":
+      fixedJson = fixedJson.replace(/'(\w+)'(\s*:)/g, '"$1"$2');
+      
+      // 3. 将字符串值的单引号替换为双引号: : 'value' -> : "value"
+      // 但要小心处理值中包含单引号的情况
+      fixedJson = fixedJson.replace(/:\s*'([^']*)'/g, ': "$1"');
+      
+      // 4. 恢复转义的单引号（在双引号字符串中变成普通单引号）
+      fixedJson = fixedJson.replace(/___ESCAPED_QUOTE___/g, "'");
+      
+      // 5. 移除尾随逗号
+      fixedJson = fixedJson.replace(/,(\s*[}\]])/g, '$1');
+      
+      items = JSON.parse(fixedJson);
+    }
+    
+    if (Array.isArray(items)) {
+      return items.map((item: any) => ({
+        name: item.name || '',
+        type: item.type || 'text',
+        action: item.action,
+      }));
+    }
+  } catch (e) {
+    console.error('[parseLoginUi] Failed to parse loginUi:', e);
+    // 尝试使用 eval 作为最后手段（不推荐，但某些书源可能需要）
+    try {
+      // eslint-disable-next-line no-eval
+      const items = eval(`(${loginUi})`);
+      if (Array.isArray(items)) {
+        return items.map((item: any) => ({
+          name: item.name || '',
+          type: item.type || 'text',
+          action: item.action,
+        }));
+      }
+    } catch (evalError) {
+      console.error('[parseLoginUi] Eval fallback also failed:', evalError);
+    }
+  }
+  return [];
+}
+
+/**
+ * 提取登录 JS 代码
+ * 参考 Legado BaseSource.getLoginJs()
+ */
+export function getLoginJs(loginUrl?: string): string | null {
+  if (!loginUrl) return null;
+  if (loginUrl.startsWith('@js:')) {
+    return loginUrl.substring(4);
+  }
+  if (loginUrl.startsWith('<js>')) {
+    const endIndex = loginUrl.lastIndexOf('<');
+    return loginUrl.substring(4, endIndex > 4 ? endIndex : loginUrl.length);
+  }
+  return loginUrl;
+}
+
+/**
+ * 获取登录信息
+ */
+export function getLoginInfo(sourceKey: string): Record<string, string> | null {
+  // 先从内存获取
+  if (loginInfoStore.has(sourceKey)) {
+    return loginInfoStore.get(sourceKey)!;
+  }
+  // 从持久化存储获取
+  const cached = CacheManager.get(`loginInfo_${sourceKey}`);
+  if (cached) {
+    try {
+      const info = JSON.parse(cached);
+      loginInfoStore.set(sourceKey, info);
+      return info;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+/**
+ * 保存登录信息
+ */
+export function putLoginInfo(sourceKey: string, info: Record<string, string>): void {
+  loginInfoStore.set(sourceKey, info);
+  CacheManager.put(`loginInfo_${sourceKey}`, JSON.stringify(info));
+}
+
+/**
+ * 删除登录信息
+ */
+export function removeLoginInfo(sourceKey: string): void {
+  loginInfoStore.delete(sourceKey);
+  CacheManager.delete(`loginInfo_${sourceKey}`);
+}
+
+/**
+ * 获取登录头部
+ */
+export function getLoginHeader(sourceKey: string): Record<string, string> | null {
+  if (loginHeaderStore.has(sourceKey)) {
+    return loginHeaderStore.get(sourceKey)!;
+  }
+  const cached = CacheManager.get(`loginHeader_${sourceKey}`);
+  if (cached) {
+    try {
+      const header = JSON.parse(cached);
+      loginHeaderStore.set(sourceKey, header);
+      return header;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+/**
+ * 保存登录头部
+ */
+export function putLoginHeader(sourceKey: string, header: Record<string, string>): void {
+  loginHeaderStore.set(sourceKey, header);
+  CacheManager.put(`loginHeader_${sourceKey}`, JSON.stringify(header));
+  // 如果有 Cookie，同步到 CookieStore
+  const cookie = header['Cookie'] || header['cookie'];
+  if (cookie) {
+    CookieStore.replaceCookie(sourceKey, cookie);
+  }
+}
+
+/**
+ * 删除登录头部
+ */
+export function removeLoginHeader(sourceKey: string): void {
+  loginHeaderStore.delete(sourceKey);
+  CacheManager.delete(`loginHeader_${sourceKey}`);
+  CookieStore.removeCookie(sourceKey);
+}
+
+/**
+ * 执行登录
+ * 参考 Legado BaseSource.login()
+ */
+export async function executeLogin(
+  source: BookSource,
+  loginData: Record<string, string>
+): Promise<LoginResult> {
+  const sourceKey = source.bookSourceUrl;
+  
+  // 保存登录信息
+  putLoginInfo(sourceKey, loginData);
+  
+  const loginJs = getLoginJs(source.loginUrl);
+  if (!loginJs) {
+    return { success: false, message: '未配置登录规则' };
+  }
+
+  try {
+    // 创建 AnalyzeUrl 执行 JS
+    const analyzeUrl = new AnalyzeUrl(sourceKey, {
+      source,
+      variables: {
+        _jsLib: source.jsLib,
+      },
+    });
+
+    // 构建登录 JS - 参考 Legado
+    // loginJs 中应该定义一个 login 函数
+    const fullJs = `
+      ${loginJs}
+      if (typeof login === 'function') {
+        login.apply(this);
+      } else {
+        throw new Error('Function login not implemented!');
+      }
+    `;
+
+    // 执行登录 JS，传入登录数据
+    const result = analyzeUrl.evalJsWithLoginData(fullJs, loginData);
+    
+    // 检查结果
+    if (result && typeof result === 'object') {
+      // 如果返回了 header，保存它
+      if (result.header || result.headers) {
+        putLoginHeader(sourceKey, result.header || result.headers);
+      }
+      return { 
+        success: true, 
+        message: result.message || '登录成功',
+        loginHeader: result.header || result.headers,
+      };
+    }
+    
+    return { success: true, message: '登录成功' };
+  } catch (error: any) {
+    console.error('[executeLogin] Error:', error);
+    return { 
+      success: false, 
+      message: error.message || '登录失败',
+    };
+  }
+}
+
+/**
+ * 执行按钮动作
+ */
+export async function executeButtonAction(
+  source: BookSource,
+  action: string,
+  loginData: Record<string, string>
+): Promise<{ success: boolean; message?: string; result?: any }> {
+  if (!action) {
+    return { success: false, message: '未配置按钮动作' };
+  }
+
+  // 如果是 URL，返回让前端打开
+  if (action.startsWith('http://') || action.startsWith('https://')) {
+    return { success: true, result: { type: 'url', url: action } };
+  }
+
+  // 执行 JS
+  try {
+    const loginJs = getLoginJs(source.loginUrl) || '';
+    const analyzeUrl = new AnalyzeUrl(source.bookSourceUrl, {
+      source,
+      variables: {
+        _jsLib: source.jsLib,
+      },
+    });
+
+    const fullJs = `${loginJs}\n${action}`;
+    const result = analyzeUrl.evalJsWithLoginData(fullJs, loginData);
+    
+    return { success: true, result };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * 检查登录状态
+ */
+export function checkLoginStatus(source: BookSource): {
+  hasLoginUrl: boolean;
+  hasLoginUi: boolean;
+  isLoggedIn: boolean;
+  loginInfo: Record<string, string> | null;
+} {
+  const sourceKey = source.bookSourceUrl;
+  const loginInfo = getLoginInfo(sourceKey);
+  const loginHeader = getLoginHeader(sourceKey);
+  
+  return {
+    hasLoginUrl: !!source.loginUrl,
+    hasLoginUi: !!source.loginUi,
+    isLoggedIn: !!(loginInfo || loginHeader),
+    loginInfo,
+  };
+}
+
+// 导入 CacheManager 和 CookieStore
+import CacheManager from './cache-manager';
+import CookieStore from './cookie-manager';
+
 export default SourceDebugger;

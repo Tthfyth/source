@@ -15,7 +15,21 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 // import MenuBuilder from './menu'; // 已禁用默认菜单
 import { resolveHtmlPath } from './util';
-import { SourceDebugger, BookSource, YiciyuanDebugger, isYiciyuanSource } from './debug';
+import { 
+  SourceDebugger, 
+  BookSource, 
+  YiciyuanDebugger, 
+  isYiciyuanSource, 
+  parseExploreUrl,
+  parseLoginUi,
+  checkLoginStatus,
+  executeLogin,
+  executeButtonAction,
+  getLoginInfo,
+  removeLoginInfo,
+  getLoginHeader,
+  removeLoginHeader,
+} from './debug';
 import { getAIService, ChatMessage } from './ai/ai-service';
 
 class AppUpdater {
@@ -26,6 +40,11 @@ class AppUpdater {
     // 配置自动更新
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
+    
+    // 开发模式下也检查更新（需要 dev-app-update.yml）
+    if (!app.isPackaged) {
+      autoUpdater.forceDevUpdateConfig = true;
+    }
 
     // 检查更新事件
     autoUpdater.on('checking-for-update', () => {
@@ -59,7 +78,18 @@ class AppUpdater {
 
     autoUpdater.on('error', (err) => {
       log.error('更新错误:', err);
-      this.sendStatusToWindow('error', err.message);
+      // 简化错误信息，避免显示过长的技术细节
+      let errorMessage = '网络连接失败，请稍后重试';
+      if (err.message) {
+        if (err.message.includes('404') || err.message.includes('latest.yml')) {
+          errorMessage = '暂无更新信息，请前往 GitHub 查看';
+        } else if (err.message.includes('net::') || err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT')) {
+          errorMessage = '网络连接失败，请检查网络后重试';
+        } else if (err.message.includes('certificate') || err.message.includes('SSL')) {
+          errorMessage = '网络安全验证失败，请检查网络环境';
+        }
+      }
+      this.sendStatusToWindow('error', errorMessage);
     });
 
     autoUpdater.on('download-progress', (progressObj) => {
@@ -164,6 +194,26 @@ ipcMain.handle(
 );
 
 /**
+ * 解析发现分类列表
+ * 支持 JS 动态规则
+ */
+ipcMain.handle(
+  'debug:parseExploreCategories',
+  async (_event, source: any) => {
+    try {
+      const categories = await parseExploreUrl(source as BookSource);
+      return { success: true, categories };
+    } catch (error: any) {
+      return {
+        success: false,
+        categories: [],
+        error: error.message || String(error),
+      };
+    }
+  }
+);
+
+/**
  * 书籍详情测试
  * 自动识别源格式（Legado 或 异次元）
  */
@@ -243,6 +293,106 @@ ipcMain.handle(
     }
   }
 );
+
+// ============================================
+// IPC 通信接口 - 登录功能
+// ============================================
+
+/**
+ * 解析登录 UI 配置
+ */
+ipcMain.handle('debug:parseLoginUi', async (_event, loginUi: string) => {
+  try {
+    const items = parseLoginUi(loginUi);
+    return { success: true, items };
+  } catch (error: any) {
+    return { success: false, items: [], error: error.message };
+  }
+});
+
+/**
+ * 检查登录状态
+ */
+ipcMain.handle('debug:checkLoginStatus', async (_event, source: any) => {
+  try {
+    const status = checkLoginStatus(source as BookSource);
+    return { success: true, ...status };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 执行登录
+ */
+ipcMain.handle('debug:executeLogin', async (_event, source: any, loginData: Record<string, string>) => {
+  try {
+    const result = await executeLogin(source as BookSource, loginData);
+    return result;
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+});
+
+/**
+ * 执行按钮动作
+ */
+ipcMain.handle('debug:executeButtonAction', async (_event, source: any, action: string, loginData: Record<string, string>) => {
+  try {
+    const result = await executeButtonAction(source as BookSource, action, loginData);
+    return result;
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+});
+
+/**
+ * 获取登录信息
+ */
+ipcMain.handle('debug:getLoginInfo', async (_event, sourceKey: string) => {
+  try {
+    const info = getLoginInfo(sourceKey);
+    return { success: true, info };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 删除登录信息
+ */
+ipcMain.handle('debug:removeLoginInfo', async (_event, sourceKey: string) => {
+  try {
+    removeLoginInfo(sourceKey);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 获取登录头部
+ */
+ipcMain.handle('debug:getLoginHeader', async (_event, sourceKey: string) => {
+  try {
+    const header = getLoginHeader(sourceKey);
+    return { success: true, header };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+/**
+ * 删除登录头部
+ */
+ipcMain.handle('debug:removeLoginHeader', async (_event, sourceKey: string) => {
+  try {
+    removeLoginHeader(sourceKey);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
 
 // ============================================
 // IPC 通信接口 - 文件操作
@@ -370,7 +520,40 @@ ipcMain.handle('app:quitAndInstall', () => {
  * 获取应用版本
  */
 ipcMain.handle('app:getVersion', () => {
-  return app.getVersion();
+  // 打包后使用 app.getVersion()，开发模式下从 package.json 读取
+  if (app.isPackaged) {
+    return app.getVersion();
+  }
+  // 开发模式下读取 release/app/package.json
+  try {
+    const path = require('path');
+    const fs = require('fs');
+    // 从项目根目录查找
+    const possiblePaths = [
+      path.join(process.cwd(), 'release/app/package.json'),
+      path.join(__dirname, '../../../release/app/package.json'),
+      path.join(__dirname, '../../../../release/app/package.json'),
+    ];
+    for (const pkgPath of possiblePaths) {
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        if (pkg.version) {
+          return pkg.version;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read version:', e);
+  }
+  return '0.0.0';
+});
+
+/**
+ * 打开外部链接
+ */
+ipcMain.handle('app:openExternal', async (_event, url: string) => {
+  const { shell } = require('electron');
+  await shell.openExternal(url);
 });
 
 // ============================================

@@ -2,7 +2,7 @@
 /* eslint no-unused-vars: off */
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
-export type Channels = 'ipc-example';
+export type Channels = 'ipc-example' | 'update-status';
 
 const electronHandler = {
   ipcRenderer: {
@@ -20,6 +20,12 @@ const electronHandler = {
     },
     once(channel: Channels, func: (...args: unknown[]) => void) {
       ipcRenderer.once(channel, (_event, ...args) => func(...args));
+    },
+    invoke(channel: string, ...args: unknown[]) {
+      return ipcRenderer.invoke(channel, ...args);
+    },
+    removeListener(channel: string, func: (...args: unknown[]) => void) {
+      ipcRenderer.removeListener(channel, func);
     },
   },
 };
@@ -43,6 +49,13 @@ const debugApiHandler = {
   },
 
   /**
+   * 解析发现分类列表（支持 JS 动态规则）
+   */
+  parseExploreCategories: (source: any) => {
+    return ipcRenderer.invoke('debug:parseExploreCategories', source);
+  },
+
+  /**
    * 书籍详情测试
    */
   bookInfo: (source: any, bookUrl: string) => {
@@ -61,6 +74,64 @@ const debugApiHandler = {
    */
   content: (source: any, contentUrl: string) => {
     return ipcRenderer.invoke('debug:content', source, contentUrl);
+  },
+
+  // ===== 登录相关 =====
+  
+  /**
+   * 解析登录 UI 配置
+   */
+  parseLoginUi: (loginUi: string) => {
+    return ipcRenderer.invoke('debug:parseLoginUi', loginUi);
+  },
+
+  /**
+   * 检查登录状态
+   */
+  checkLoginStatus: (source: any) => {
+    return ipcRenderer.invoke('debug:checkLoginStatus', source);
+  },
+
+  /**
+   * 执行登录
+   */
+  executeLogin: (source: any, loginData: Record<string, string>) => {
+    return ipcRenderer.invoke('debug:executeLogin', source, loginData);
+  },
+
+  /**
+   * 执行按钮动作
+   */
+  executeButtonAction: (source: any, action: string, loginData: Record<string, string>) => {
+    return ipcRenderer.invoke('debug:executeButtonAction', source, action, loginData);
+  },
+
+  /**
+   * 获取登录信息
+   */
+  getLoginInfo: (sourceKey: string) => {
+    return ipcRenderer.invoke('debug:getLoginInfo', sourceKey);
+  },
+
+  /**
+   * 删除登录信息
+   */
+  removeLoginInfo: (sourceKey: string) => {
+    return ipcRenderer.invoke('debug:removeLoginInfo', sourceKey);
+  },
+
+  /**
+   * 获取登录头部
+   */
+  getLoginHeader: (sourceKey: string) => {
+    return ipcRenderer.invoke('debug:getLoginHeader', sourceKey);
+  },
+
+  /**
+   * 删除登录头部
+   */
+  removeLoginHeader: (sourceKey: string) => {
+    return ipcRenderer.invoke('debug:removeLoginHeader', sourceKey);
   },
 };
 
